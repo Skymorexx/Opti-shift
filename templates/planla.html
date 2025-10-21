@@ -109,6 +109,13 @@
         {% if result.text %}
           <pre class="plan-text">{{ result.text }}</pre>
         {% endif %}
+        {% if result.fallback_notes %}
+          <div class="alert success">
+            {% for note in result.fallback_notes %}
+              <div>{{ note }}</div>
+            {% endfor %}
+          </div>
+        {% endif %}
       </section>
     {% endif %}
 

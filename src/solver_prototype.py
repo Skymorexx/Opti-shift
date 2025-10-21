@@ -117,6 +117,7 @@ class SchedulingPrototype:
         clinic_rotation_days: Optional[Mapping[int, int]] = None,
         clinic_seniority_rules: Optional[Mapping[int, Mapping[str, int]]] = None,
         repeat_history: Optional[Mapping[int, Sequence[str]]] = None,
+        weekend_history_counts: Optional[Mapping[str, int]] = None,
         leave_calendar: Optional[Mapping[str, Sequence[Tuple[dt.date, dt.date]]]] = None,
         objective_mode: str = "seniority",
     ):

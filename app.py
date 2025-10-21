@@ -129,6 +129,7 @@ def index():
 
 
 def compute_plan(year=None, month=None, plan_type: str = "clinic", *, clinics=None, duty_types=None):
+    fallback_notes: List[str] = []
     today = date.today()
     selected_year = _safe_int(year) or today.year
     selected_month = _safe_int(month) or today.month
@@ -305,6 +306,7 @@ def compute_plan(year=None, month=None, plan_type: str = "clinic", *, clinics=No
             "cap_summary": cap_result.get("cap_summary", []),
             "night_summary": night_result.get("summary_rows", []),
         }
+        fallback_notes.extend(night_result.get("fallback_notes", []))
     else:
         mesa_duty_types = [
             row for row in duty_type_records
@@ -328,15 +330,45 @@ def compute_plan(year=None, month=None, plan_type: str = "clinic", *, clinics=No
             error = "Bu verilerle olusturulacak slot bulunamadi. Klinik ve gorev tanimlarinizi kontrol edin."
             return None, error, 400
 
+        clinic_rules_map = {cid: dict(rules) for cid, rules in clinic_rule_map.items()}
         try:
             result = solve_schedule(
                 people=people,
                 slots=slots,
                 clinic_rotation_periods=clinic_rotation_periods,
-                clinic_seniority_rules={cid: dict(rules) for cid, rules in clinic_rule_map.items()},
+                clinic_seniority_rules=clinic_rules_map,
                 clinic_repeat_history=clinic_repeat_payload,
                 staff_leave_requests=leave_requests_map,
             )
+        except RuntimeError as exc:
+            try:
+                result = solve_schedule(
+                    people=people,
+                    slots=slots,
+                    clinic_rotation_periods=clinic_rotation_periods,
+                    clinic_seniority_rules=clinic_rules_map,
+                    clinic_repeat_history=None,
+                    staff_leave_requests=leave_requests_map,
+                )
+                fallback_notes.append(
+                    "Repeat penalty disabled to find a solution; consecutive clinic assignments may occur."
+                )
+            except RuntimeError:
+                try:
+                    result = solve_schedule(
+                        people=people,
+                        slots=slots,
+                        clinic_rotation_periods=clinic_rotation_periods,
+                        clinic_seniority_rules=None,
+                        clinic_repeat_history=None,
+                        staff_leave_requests=leave_requests_map,
+                    )
+                    fallback_notes.append(
+                        "Seniority requirements relaxed; please review clinic staffing manually."
+                    )
+                except RuntimeError as exc_final:
+                    error = f"Planlama sirasinda hata olustu: {exc_final}"
+                    return None, error, 500
         except Exception as exc:  # pragma: no cover - safeguarding prototype
             error = f"Planlama sirasinda hata olustu: {exc}"
             return None, error, 500
@@ -345,6 +377,7 @@ def compute_plan(year=None, month=None, plan_type: str = "clinic", *, clinics=No
     result["selected_month"] = selected_month
     result["plan_type"] = normalized_plan
     result["plan_period"] = _plan_period(selected_year, selected_month)
+    result["fallback_notes"] = fallback_notes
     return result, None, None
 
 
@@ -538,8 +571,9 @@ def build_night_plan(*, people, night_duties, year, month, leave_requests=None, 
             "objective_value": 0,
         }
 
+    weekend_history_map = dict(weekend_history or {})
+    used_relaxed_weekend = False
     try:
-        weekend_history_map = dict(weekend_history or {})
         solver_result = solve_schedule(
             assistant_people,
             slots,
@@ -549,8 +583,20 @@ def build_night_plan(*, people, night_duties, year, month, leave_requests=None, 
             weekend_history_counts=weekend_history_map,
             objective_mode="balanced",
         )
-    except RuntimeError as exc:
-        raise ValueError(f"Gece nobeti atamalari icin cozum bulunamadi: {exc}") from exc
+    except RuntimeError:
+        used_relaxed_weekend = True
+        try:
+            solver_result = solve_schedule(
+                assistant_people,
+                slots,
+                enforce_person_limits=True,
+                clinic_repeat_history=None,
+                staff_leave_requests=leave_requests,
+                weekend_history_counts=None,
+                objective_mode="balanced",
+            )
+        except RuntimeError as exc:
+            raise ValueError(f"Gece nobeti atamalari icin cozum bulunamadi: {exc}") from exc
     assignments = solver_result["assignments"]
 
     summary = {}
@@ -648,7 +694,7 @@ def build_night_plan(*, people, night_duties, year, month, leave_requests=None, 
     else:
         lines.append("- Asistanlara gorev atanmadi.")
 
-    return {
+    result_dict = {
         "assignments": assignments,
         "loads": loads_enriched,
         "text": "\n".join(lines),
@@ -656,6 +702,13 @@ def build_night_plan(*, people, night_duties, year, month, leave_requests=None, 
         "status_label": solver_result.get("status_label"),
         "objective_value": solver_result.get("objective_value", 0),
     }
+    if used_relaxed_weekend:
+        result_dict["fallback_notes"] = [
+            "Weekend fairness history relaxed to produce a schedule; verify weekend coverage manually.",
+        ]
+    else:
+        result_dict["fallback_notes"] = []
+    return result_dict
 
 
 def build_year_options(selected_year):
