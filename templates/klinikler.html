@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="tr">
+  <head>
+    <meta charset="utf-8">
+    <title>Opt-shft | Klinikler</title>
+    <style>
+      body { font-family: Arial, sans-serif; margin: 2rem; background: #f7f7f9; color: #222; }
+      h1 { margin-bottom: 1.5rem; }
+      .panel { background: #fff; padding: 1.5rem; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.08); margin-bottom: 2rem; }
+      table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+      th, td { padding: 0.6rem 0.8rem; border-bottom: 1px solid #ddd; text-align: left; vertical-align: middle; }
+      th { background: #f0f0f3; }
+      .alert { background: #ffe0e0; border: 1px solid #ff9494; padding: 0.75rem; border-radius: 6px; margin-bottom: 1rem; color: #b00020; }
+      form label { display: block; font-weight: bold; margin-bottom: 0.25rem; }
+      form input { width: 100%; padding: 0.6rem; margin-bottom: 1rem; border: 1px solid #ccc; border-radius: 6px; }
+      form select { width: 100%; padding: 0.6rem; margin-bottom: 1rem; border: 1px solid #ccc; border-radius: 6px; background: #fff; }
+      form input[type="number"] { max-width: 140px; }
+      button { background: #007bff; color: white; padding: 0.6rem 1.2rem; border: none; border-radius: 6px; cursor: pointer; }
+      button:hover { background: #005fcc; }
+      .empty-state { color: #555; font-style: italic; }
+      nav a { margin-right: 1rem; text-decoration: none; color: #007bff; }
+      nav a:hover { text-decoration: underline; }
+      .actions { display: flex; flex-direction: column; gap: 0.8rem; align-items: flex-start; }
+      .actions form { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; margin: 0; }
+      .actions button { padding: 0.35rem 0.9rem; font-size: 0.85rem; }
+      .actions-inline { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+      .actions-inline form { margin: 0; }
+      .actions button.delete { background: #dc3545; }
+      .actions button.delete:hover { background: #b02a37; }
+      .actions button:disabled { background: #c3c8cf; cursor: not-allowed; }
+      .coverage { font-size: 0.9rem; color: #555; }
+      .rotation-tag { display: inline-block; margin-top: 0.25rem; padding: 0.2rem 0.6rem; background: #eaf6ff; color: #0366d6; border-radius: 999px; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.02em; }
+      .rule-manager { width: 100%; background: #f7f9fc; border: 1px solid #dbe3f0; border-radius: 6px; padding: 0.75rem; }
+      .rule-manager h3 { margin: 0 0 0.5rem; font-size: 1rem; }
+      .rule-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.35rem; }
+      .rule-item { display: flex; align-items: center; gap: 0.5rem; }
+      .badge { display: inline-block; background: #e6ecff; color: #1b3a7a; padding: 0.15rem 0.55rem; border-radius: 999px; font-size: 0.8rem; font-weight: 600; }
+      .empty-rules { font-size: 0.85rem; color: #666; margin: 0; }
+      .rule-manager form { margin-top: 0.75rem; }
+      .rule-manager form input[type="number"], .rule-manager form select { margin-bottom: 0; width: auto; min-width: 120px; }
+    </style>
+  </head>
+  <body>
+    <h1>Klinikler</h1>
+    <nav>
+      <a href="{{ url_for('personel') }}">Personel</a>
+      <a href="{{ url_for('nobetler') }}">Nobet Turleri</a>
+      <a href="{{ url_for('nler') }}">Izinler</a>
+      <a href="{{ url_for('planla') }}">Planlama</a>
+    </nav>
+
+    <section class="panel">
+      <h2>Yeni Klinik Ekle</h2>
+      {% if error %}
+        <div class="alert">{{ error }}</div>
+      {% endif %}
+      <form method="post" action="{{ url_for('klinikler') }}">
+        <input type="hidden" name="action" value="add">
+        <label for="name">Klinik Adi</label>
+        <input type="text" id="name" name="name" placeholder="Orn: Dermatoloji" required>
+        <label for="required_assistants">Gerekli Asistan Sayisi</label>
+        <input type="number" id="required_assistants" name="required_assistants" value="1" min="1" required>
+        <label for="rotation_period">Rotasyon Peryodu</label>
+        <select id="rotation_period" name="rotation_period">
+          {% for value, label in rotation_options %}
+            <option value="{{ value }}" {% if value == default_rotation %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+        <label for="responsible_specialist">Sorumlu Uzman</label>
+        <select id="responsible_specialist" name="responsible_specialist">
+          <option value="">Sorumlu uzman secin</option>
+          {% for specialist in specialists %}
+            <option value="{{ specialist['id'] }}">{{ specialist['name'] }}</option>
+          {% endfor %}
+        </select>
+        <button type="submit">Ekle</button>
+      </form>
+    </section>
+
+    <section class="panel">
+      <h2>Kayitli Klinikler</h2>
+      {% if clinics %}
+        <table>
+          <thead>
+            <tr>
+              <th>Sira</th>
+              <th>Klinik Adi</th>
+              <th>Sorumlu Uzman</th>
+              <th>Ihtiyac Duyulan Asistan</th>
+              <th>Islemler</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for clinic in clinics %}
+              <tr>
+                <td>{{ clinic["display_order"] or loop.index }}</td>
+                <td>{{ clinic["name"] }}</td>
+                <td>{{ clinic["responsible_name"] or '-' }}</td>
+                <td>
+                  <span class="coverage">{{ clinic["required_assistants"] or 1 }}</span>
+                  <span class="rotation-tag">{{ clinic["rotation_period_label"] }}</span>
+                </td>
+                <td class="actions">
+                  <form method="post" action="{{ url_for('klinikler') }}">
+                    <input type="hidden" name="action" value="update">
+                    <input type="hidden" name="clinic_id" value="{{ clinic['id'] }}">
+                    <input type="number" name="required_assistants" value="{{ clinic['required_assistants'] or 1 }}" min="1" required>
+                    <select name="rotation_period">
+                      {% for value, label in rotation_options %}
+                        <option value="{{ value }}" {% if clinic['rotation_period'] == value %}selected{% endif %}>{{ label }}</option>
+                      {% endfor %}
+                    </select>
+                    <select name="responsible_specialist">
+                      <option value="">Sorumlu uzman secin</option>
+                      {% for specialist in specialists %}
+                        <option value="{{ specialist['id'] }}" {% if clinic['sorumlu_uzman_id'] == specialist['id'] %}selected{% endif %}>{{ specialist['name'] }}</option>
+                      {% endfor %}
+                    </select>
+                    <button type="submit">Kaydet</button>
+                  </form>
+                  <div class="actions-inline">
+                    <form method="post" action="{{ url_for('klinikler') }}">
+                      <input type="hidden" name="action" value="move_up">
+                      <input type="hidden" name="clinic_id" value="{{ clinic['id'] }}">
+                      <button type="submit" {% if loop.first %}disabled{% endif %}>Yukari</button>
+                    </form>
+                    <form method="post" action="{{ url_for('klinikler') }}">
+                      <input type="hidden" name="action" value="move_down">
+                      <input type="hidden" name="clinic_id" value="{{ clinic['id'] }}">
+                      <button type="submit" {% if loop.last %}disabled{% endif %}>Asagi</button>
+                    </form>
+                    <form method="post" action="{{ url_for('klinikler') }}">
+                      <input type="hidden" name="action" value="delete">
+                      <input type="hidden" name="clinic_id" value="{{ clinic['id'] }}">
+                      <button type="submit" class="delete">Sil</button>
+                    </form>
+                  </div>
+                  <div class="rule-manager">
+                    <h3>Kidem Kurallari</h3>
+                    {% if clinic.seniority_rules %}
+                      <ul class="rule-list">
+                        {% for rule in clinic.seniority_rules %}
+                          <li class="rule-item">
+                            <span class="badge">{{ rule["seniority_label"] }}</span>
+                            <span>{{ rule["required_count"] }} adet</span>
+                            <form method="post" action="{{ url_for('klinikler') }}">
+                              <input type="hidden" name="action" value="delete_rule">
+                              <input type="hidden" name="rule_id" value="{{ rule['id'] }}">
+                              <button type="submit" class="delete">Sil</button>
+                            </form>
+                          </li>
+                        {% endfor %}
+                      </ul>
+                    {% else %}
+                      <p class="empty-rules">Henuz kural eklenmedi.</p>
+                    {% endif %}
+                    <form method="post" action="{{ url_for('klinikler') }}">
+                      <input type="hidden" name="action" value="add_rule">
+                      <input type="hidden" name="clinic_id" value="{{ clinic['id'] }}">
+                      <label for="rule-seniority-{{ clinic['id'] }}">Yeni kural</label>
+                      <select id="rule-seniority-{{ clinic['id'] }}" name="required_seniority">
+                        {% for value, label in seniority_options %}
+                          <option value="{{ value }}">{{ label }}</option>
+                        {% endfor %}
+                      </select>
+                      <input type="number" name="required_count" value="1" min="1">
+                      <button type="submit">Ekle</button>
+                    </form>
+                  </div>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p class="empty-state">Henuz klinik eklenmedi.</p>
+      {% endif %}
+    </section>
+  </body>
+</html>

@@ -1,0 +1,37 @@
+*** Begin Patch
+*** Update File: app.py
+@@
+ def build_night_plan(*, people, night_duties, year, month, leave_requests=None, weekend_history=None):
+     if not night_duties:
+         return {
+             "assignments": [],
+             "loads": [],
+@@
+         )
+ 
+     assistant_people = [
+         person
+         for person in people
+@@
+     slots = slots_from_records(
+         clinics=[],
+         duty_types=night_duties,
+         year=year,
+         month=month,
+         plan_type="nobet",
+     )
+@@
+ 
+     try:
++        weekend_history_map = dict(weekend_history or {})
+         solver_result = solve_schedule(
+             assistant_people,
+             slots,
+             enforce_person_limits=True,
+             clinic_repeat_history=None,
+             staff_leave_requests=leave_requests,
+-            weekend_history_counts=weekend_history,
++            weekend_history_counts=weekend_history_map,
+             objective_mode="balanced",
+         )
+*** End Patch

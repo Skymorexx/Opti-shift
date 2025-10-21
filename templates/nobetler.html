@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="tr">
+  <head>
+    <meta charset="utf-8">
+    <title>Opt-shft | Nobet Turleri</title>
+    <style>
+      body { font-family: Arial, sans-serif; margin: 2rem; background: #f7f7f9; color: #222; }
+      h1 { margin-bottom: 1.5rem; }
+      .panel { background: #fff; padding: 1.5rem; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.08); margin-bottom: 2rem; }
+      table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+      th, td { padding: 0.6rem 0.8rem; border-bottom: 1px solid #ddd; text-align: left; }
+      th { background: #f0f0f3; }
+      .alert { background: #ffe0e0; border: 1px solid #ff9494; padding: 0.75rem; border-radius: 6px; margin-bottom: 1rem; color: #b00020; }
+      form label { display: block; font-weight: bold; margin-bottom: 0.25rem; }
+      form input, form select { width: 100%; padding: 0.6rem; margin-bottom: 1rem; border: 1px solid #ccc; border-radius: 6px; }
+      form input[type="number"] { max-width: 160px; }
+      .inline { display: flex; gap: 1rem; align-items: center; }
+      .inline input[type="checkbox"] { width: auto; margin: 0; }
+      button { background: #007bff; color: white; padding: 0.7rem 1.4rem; border: none; border-radius: 6px; cursor: pointer; }
+      button:hover { background: #005fcc; }
+      .empty-state { color: #555; font-style: italic; }
+      nav a { margin-right: 1rem; text-decoration: none; color: #007bff; }
+      nav a:hover { text-decoration: underline; }
+      .category-pill { display: inline-block; padding: 0.1rem 0.5rem; border-radius: 999px; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.03em; }
+      .category-pill.mesa { background: #e3f2fd; color: #0b5394; }
+      .category-pill.nobet { background: #fdecea; color: #a61b1b; }
+    </style>
+  </head>
+  <body>
+    <h1>Nobet Turleri</h1>
+    <nav>
+      <a href="{{ url_for('personel') }}">Personel</a>
+      <a href="{{ url_for('klinikler') }}">Klinikler</a>
+      <a href="{{ url_for('nler') }}">Izinler</a>
+      <a href="{{ url_for('planla') }}">Planlama</a>
+    </nav>
+
+    <section class="panel">
+      <h2>Yeni Nobet Turu Ekle</h2>
+      {% if error %}
+        <div class="alert">{{ error }}</div>
+      {% endif %}
+      <form method="post" action="{{ url_for('nobetler') }}">
+        <input type="hidden" name="action" value="add">
+        <label for="name">Nobet Adi</label>
+        <input type="text" id="name" name="name" placeholder="Orn: Gece Nobeti" required>
+
+        <label for="duration_hours">Sure (saat)</label>
+        <input type="number" id="duration_hours" name="duration_hours" min="1" step="1" placeholder="Orn: 16" required>
+
+        <label for="duty_category">Gorev Kategorisi</label>
+        <select id="duty_category" name="duty_category" required>
+          <option value="mesa">Mesa</option>
+          <option value="nobet" selected>Nobet</option>
+        </select>
+
+        <label for="required_staff_count">Gerekli Personel Sayisi</label>
+        <input type="number" id="required_staff_count" name="required_staff_count" min="1" value="1" required>
+
+        <div class="inline">
+          <input type="checkbox" id="is_cap" name="is_cap" value="1">
+          <label for="is_cap" style="margin:0;">Bu gorev icin cap (icap) nobeti kalibi kullan</label>
+        </div>
+
+        <button type="submit">Ekle</button>
+      </form>
+    </section>
+
+    <section class="panel">
+      <h2>Kayitli Nobet Turleri</h2>
+      {% if duty_types %}
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Ad</th>
+              <th>Sure (saat)</th>
+              <th>Kategori</th>
+              <th>Gerekli Personel</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for duty in duty_types %}
+              {% set category = (duty['duty_category'] or 'nobet') | lower %}
+              <tr>
+                <td>{{ duty["id"] }}</td>
+                <td>{{ duty["name"] }}</td>
+                <td>{{ duty["duration_hours"] }}</td>
+                <td><span class="category-pill {{ category }}">{{ category }}</span></td>
+                <td>{{ duty['required_staff_count'] or 1 }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p class="empty-state">Henuz nobet turu eklenmedi.</p>
+      {% endif %}
+    </section>
+    <script>
+      (function() {
+        var capToggle = document.getElementById('is_cap');
+        var nameInput = document.getElementById('name');
+        var durationInput = document.getElementById('duration_hours');
+        var categorySelect = document.getElementById('duty_category');
+        var requiredInput = document.getElementById('required_staff_count');
+
+        function syncCapFields() {
+          var isCap = capToggle.checked;
+          if (isCap) {
+            nameInput.value = 'cap';
+            nameInput.readOnly = true;
+            durationInput.value = 24;
+            durationInput.readOnly = true;
+            categorySelect.value = 'nobet';
+            categorySelect.disabled = true;
+            requiredInput.value = 1;
+            requiredInput.readOnly = true;
+          } else {
+            nameInput.readOnly = false;
+            durationInput.readOnly = false;
+            categorySelect.disabled = false;
+            requiredInput.readOnly = false;
+          }
+        }
+
+        capToggle.addEventListener('change', syncCapFields);
+        syncCapFields();
+      })();
+    </script>
+  </body>
+</html>

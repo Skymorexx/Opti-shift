@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="tr">
+  <head>
+    <meta charset="utf-8">
+    <title>Opt-shft | Personel Yonetimi</title>
+    <style>
+      body { font-family: Arial, sans-serif; margin: 2rem; background: #f7f7f9; color: #222; }
+      h1 { margin-bottom: 1.5rem; }
+      .panel { background: #fff; padding: 1.5rem; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.08); margin-bottom: 2rem; }
+      table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+      th, td { padding: 0.6rem 0.8rem; border-bottom: 1px solid #ddd; text-align: left; vertical-align: middle; }
+      th { background: #f0f0f3; }
+      .alert { background: #ffe0e0; border: 1px solid #ff9494; padding: 0.75rem; border-radius: 6px; margin-bottom: 1rem; color: #b00020; }
+      form label { display: block; font-weight: bold; margin-bottom: 0.25rem; }
+      form input, form select { width: 100%; padding: 0.6rem; margin-bottom: 1rem; border: 1px solid #ccc; border-radius: 6px; }
+      button { background: #007bff; color: white; padding: 0.7rem 1.4rem; border: none; border-radius: 6px; cursor: pointer; }
+      button:hover { background: #005fcc; }
+      .empty-state { color: #555; font-style: italic; }
+      nav a { margin-right: 1rem; text-decoration: none; color: #007bff; }
+      nav a:hover { text-decoration: underline; }
+      .actions { display: flex; flex-direction: column; gap: 0.6rem; align-items: flex-start; }
+      .actions form { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0; }
+      .actions button.delete { background: #dc3545; padding: 0.5rem 1rem; }
+      .actions button.delete:hover { background: #b02a37; }
+      .update-form select, .update-form button { margin-bottom: 0; }
+      .update-form select { min-width: 110px; }
+      .update-form button { background: #17a2b8; padding: 0.45rem 1.1rem; }
+      .update-form button:hover { background: #128097; }
+      #night-limits { display: none; }
+    </style>
+  </head>
+  <body>
+    <h1>Personel Yonetimi</h1>
+    <nav>
+      <a href="{{ url_for('klinikler') }}">Klinikler</a>
+      <a href="{{ url_for('nobetler') }}">Nobet Turleri</a>
+      <a href="{{ url_for('nler') }}">Izinler</a>
+      <a href="{{ url_for('planla') }}">Planlama</a>
+    </nav>
+
+    <section class="panel">
+      <h2>Yeni Personel Ekle</h2>
+      {% if error %}
+        <div class="alert">{{ error }}</div>
+      {% endif %}
+      <form method="post" action="{{ url_for('personel') }}">
+        <input type="hidden" name="action" value="add">
+        <label for="name">Ad Soyad</label>
+        <input type="text" id="name" name="name" placeholder="Orn: Dr. Ahmet Vural" required>
+
+        <label for="title">Unvan</label>
+        <select id="title" name="title" required>
+          {% for option in title_options %}
+            <option value="{{ option }}">{{ option }}</option>
+          {% endfor %}
+        </select>
+
+        <div id="seniority-group">
+          <label for="seniority">Kidem</label>
+          <select id="seniority" name="seniority">
+            <option value="">Kidem secin</option>
+            {% for value, label in seniority_options %}
+              <option value="{{ value }}">{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div id="night-limits">
+          <label for="min_night">Minimum Aylik Nobet Sayisi</label>
+          <input type="number" id="min_night" name="min_night" min="0" placeholder="Orn: 2">
+
+          <label for="max_night">Maksimum Aylik Nobet Sayisi</label>
+          <input type="number" id="max_night" name="max_night" min="0" placeholder="Orn: 6">
+        </div>
+
+        <button type="submit">Ekle</button>
+      </form>
+    </section>
+
+    <section class="panel">
+      <h2>Personel Listesi</h2>
+      {% if staff %}
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Ad Soyad</th>
+              <th>Unvan</th>
+              <th>Kidem</th>
+              <th>Min Nobet</th>
+              <th>Max Nobet</th>
+              <th>Islemler</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for person in staff %}
+              {% set seniority_value = person['seniority'] %}
+              <tr>
+                <td>{{ person['id'] }}</td>
+                <td>{{ person['name'] }}</td>
+                <td>{{ person['title'] }}</td>
+                <td>{{ seniority_labels.get(seniority_value, '-') if seniority_value else '-' }}</td>
+                <td>{{ person["min_night_duties_per_month"] if person["min_night_duties_per_month"] is not none else '-' }}</td>
+                <td>{{ person["max_night_duties_per_month"] if person["max_night_duties_per_month"] is not none else '-' }}</td>
+                <td class="actions">
+                  {% if person["title"] == "Asst. Dr." %}
+                    <form method="post" action="{{ url_for('personel') }}" class="update-form">
+                      <input type="hidden" name="action" value="update">
+                      <input type="hidden" name="staff_id" value="{{ person['id'] }}">
+                      <select name="seniority" aria-label="Kidem secin">
+                        {% for value, label in seniority_options %}
+                          <option value="{{ value }}" {% if person['seniority'] == value %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                      </select>
+                      <select name="min_night" aria-label="Minimum nobet">
+                        <option value="" {% if person['min_night_duties_per_month'] is none %}selected{% endif %}>Min yok</option>
+                        {% for value in night_limit_options %}
+                          <option value="{{ value }}" {% if person['min_night_duties_per_month'] == value %}selected{% endif %}>{{ value }}</option>
+                        {% endfor %}
+                      </select>
+                      <select name="max_night" aria-label="Maksimum nobet">
+                        <option value="" {% if person['max_night_duties_per_month'] is none %}selected{% endif %}>Max yok</option>
+                        {% for value in night_limit_options %}
+                          <option value="{{ value }}" {% if person['max_night_duties_per_month'] == value %}selected{% endif %}>{{ value }}</option>
+                        {% endfor %}
+                      </select>
+                      <button type="submit">Kaydet</button>
+                    </form>
+                  {% endif %}
+                  <form method="post" action="{{ url_for('personel') }}">
+                    <input type="hidden" name="action" value="delete">
+                    <input type="hidden" name="staff_id" value="{{ person['id'] }}">
+                    <button type="submit" class="delete">Sil</button>
+                  </form>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p class="empty-state">Henuz kayitli personel bulunmuyor.</p>
+      {% endif %}
+    </section>
+
+    <script>
+      (function() {
+        var titleSelect = document.getElementById('title');
+        var seniorityGroup = document.getElementById('seniority-group');
+        var senioritySelect = document.getElementById('seniority');
+        var nightLimits = document.getElementById('night-limits');
+        var minNightInput = document.getElementById('min_night');
+        var maxNightInput = document.getElementById('max_night');
+
+        function syncSeniority() {
+          var needsSeniority = titleSelect.value === 'Asst. Dr.';
+          seniorityGroup.style.display = needsSeniority ? 'block' : 'none';
+          senioritySelect.disabled = !needsSeniority;
+          nightLimits.style.display = needsSeniority ? 'block' : 'none';
+          minNightInput.disabled = !needsSeniority;
+          maxNightInput.disabled = !needsSeniority;
+          if (!needsSeniority) {
+            senioritySelect.value = '';
+            minNightInput.value = '';
+            maxNightInput.value = '';
+          }
+        }
+
+        titleSelect.addEventListener('change', syncSeniority);
+        syncSeniority();
+      })();
+    </script>
+  </body>
+</html>

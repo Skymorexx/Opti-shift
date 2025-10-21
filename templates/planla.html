@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="tr">
+  <head>
+    <meta charset="utf-8">
+    <title>Opt-shft | Planlama</title>
+    <style>
+      body { font-family: Arial, sans-serif; margin: 2rem; background: #f7f7f9; color: #222; }
+      h1 { margin-bottom: 1.5rem; }
+      nav a { margin-right: 1rem; text-decoration: none; color: #007bff; }
+      nav a:hover { text-decoration: underline; }
+      .panel { background: #fff; padding: 1.5rem; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.08); margin-bottom: 2rem; }
+      form { display: flex; flex-wrap: wrap; gap: 1rem; align-items: flex-end; }
+      label { display: block; font-weight: bold; margin-bottom: 0.25rem; }
+      select { padding: 0.6rem; border: 1px solid #ccc; border-radius: 6px; min-width: 120px; }
+      button, .secondary-button { background: #007bff; color: white; padding: 0.7rem 1.4rem; border: none; border-radius: 6px; cursor: pointer; text-decoration: none; display: inline-block; }
+      button:hover, .secondary-button:hover { background: #005fcc; }
+      .secondary-button { background: #28a745; }
+      .secondary-button.disabled { background: #9ab8a2; pointer-events: none; opacity: 0.7; }
+      .alert { background: #ffe0e0; border: 1px solid #ff9494; padding: 0.75rem; border-radius: 6px; margin-bottom: 1rem; color: #b00020; width: 100%; }
+      .alert.success { background: #e6ffed; border-color: #8cd49b; color: #1c5e2a; }
+      .summary { list-style: none; padding: 0; margin: 0 0 1rem 0; display: flex; flex-wrap: wrap; gap: 1.5rem; }
+      .summary li { font-weight: 500; }
+      .summary strong { font-weight: 700; }
+      .plan-text { background: #f0f3f7; padding: 1rem; border-radius: 6px; overflow-x: auto; white-space: pre-wrap; }
+      .table-wrapper { overflow-x: auto; }
+      table { width: 100%; border-collapse: collapse; margin-top: 1rem; min-width: 600px; }
+      .plan-type-group { display: flex; flex-direction: column; gap: 0.4rem; min-width: 200px; }
+      .plan-type-title { font-weight: bold; margin-bottom: 0.25rem; display: block; }
+      .plan-type-option { display: flex; align-items: center; gap: 0.5rem; font-weight: 500; }
+      .plan-type-option input { margin: 0; }
+      .pill { display: inline-block; background: #ffe082; color: #8a6700; font-size: 0.75rem; padding: 0.1rem 0.5rem; border-radius: 999px; text-transform: uppercase; letter-spacing: 0.03em; }
+      .note { font-size: 0.85rem; color: #555; margin-top: 0.5rem; }
+      th, td { padding: 0.6rem 0.8rem; border: 1px solid #ddd; text-align: left; vertical-align: top; }
+      th { background: #f0f0f3; position: sticky; top: 0; }
+      td { white-space: pre-line; }
+    </style>
+  </head>
+  <body>
+    <h1>Opt-shft Planlama</h1>
+    <nav>
+      <a href="{{ url_for('personel') }}">Personel</a>
+      <a href="{{ url_for('klinikler') }}">Klinikler</a>
+      <a href="{{ url_for('nler') }}">Izinler</a>
+      <a href="{{ url_for('nobetler') }}">Nobet Turleri</a>
+    </nav>
+
+    {% if approval_message %}
+      <div class="alert success">{{ approval_message }}</div>
+    {% elif approval_error %}
+      <div class="alert">{{ approval_error }}</div>
+    {% endif %}
+
+    <section class="panel">
+      <h2>Plan Parametreleri</h2>
+      {% if error %}
+        <div class="alert">{{ error }}</div>
+      {% endif %}
+      <form method="get" action="{{ url_for('planla') }}">
+        <div class="plan-type-group">
+          <span class="plan-type-title">Plan Turu</span>
+          {% for value, label in plan_type_options %}
+            <label class="plan-type-option">
+              <input type="radio" name="plan_type" value="{{ value }}" {% if value == selected_plan_type %}checked{% endif %}>
+              <span>{{ label }}</span>
+              {% if value != 'clinic' %}
+                <span class="pill">Yakında</span>
+              {% endif %}
+            </label>
+          {% endfor %}
+        </div>
+        <div>
+          <label for="year">Yil</label>
+          <select id="year" name="year">
+            {% for year in year_options %}
+              <option value="{{ year }}" {% if year == selected_year %}selected{% endif %}>{{ year }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label for="month">Ay</label>
+          <select id="month" name="month">
+            {% for value, label in month_options %}
+              <option value="{{ value }}" {% if value == selected_month %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <button type="submit">Plan Olustur</button>
+        </div>
+        {% set excel_disabled = error %}
+        <div>
+          <a href="{{ download_url }}" class="secondary-button{% if excel_disabled %} disabled{% endif %}" {% if excel_disabled %}aria-disabled="true" tabindex="-1"{% endif %}>Excel Indir</a>
+        </div>
+      </form>
+      {% if selected_plan_type == 'nobet' %}
+        <p class="note">Cap nobeti uzman doktorlar arasinda gunlere sirayla pay edilir.</p>
+      {% endif %}
+    </section>
+
+    {% if result %}
+      <section class="panel">
+        <h2>Plan Ozeti</h2>
+        <ul class="summary">
+          <li><strong>Durum:</strong> {{ result.status_label }}</li>
+          <li><strong>Hedef:</strong> {{ result.objective_value|round(0) }}</li>
+          <li><strong>Donem:</strong> {{ selected_month_label }} {{ selected_year }}</li>
+          <li><strong>Plan:</strong> {{ selected_plan_type_label }}</li>
+        </ul>
+        {% if result.text %}
+          <pre class="plan-text">{{ result.text }}</pre>
+        {% endif %}
+      </section>
+    {% endif %}
+
+    {% if result and selected_plan_type == 'clinic' %}
+      <section class="panel">
+        <h2>Planı Onayla ve Kaydet</h2>
+        <p class="note">Onaylanan planin atamalari {{ plan_period }} donemi icin kaydedilir ve gelecek ayin adalet hesabinda kullanilir.</p>
+        <form method="post" action="{{ url_for('planla_approve') }}">
+          <input type="hidden" name="year" value="{{ selected_year }}">
+          <input type="hidden" name="month" value="{{ selected_month }}">
+          <input type="hidden" name="plan_type" value="{{ selected_plan_type }}">
+          <button type="submit">Planı Onayla ve Gelecek Ay için Kaydet</button>
+        </form>
+      </section>
+    {% endif %}
+
+    {% if plan_table %}
+      <section class="panel">
+        <h2>Gunluk Plan Tablosu</h2>
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                {% for header in plan_table.headers %}
+                  <th>{{ header }}</th>
+                {% endfor %}
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in plan_table.rows %}
+                <tr>
+                  {% for header in plan_table.headers %}
+                    <td>{{ row[header] }}</td>
+                  {% endfor %}
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    {% endif %}
+  </body>
+</html>
