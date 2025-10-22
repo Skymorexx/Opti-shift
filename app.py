@@ -1755,9 +1755,9 @@ def izinler_legacy():
 
 @app.route("/setup-account")
 def setup_account():
-    unit_name = "Kartal Dermatoloji"
-    username = "kartal_derma"
-    password = "kartalderma123"
+    unit_name = "Medeniyet Dermatoloji"
+    username = "medeniyet_derma"
+    password = "medeniyetderma123"
 
     init_db()
 
