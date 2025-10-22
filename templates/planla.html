@@ -1,14 +1,14 @@
 {% extends "layout.html" %}
 
-{% block title %}Opti-shift | Planlama{% endblock %}
+{% block title %}{{ t('Opti-Shift | Planlama') }}{% endblock %}
 
 {% block page_header %}
   <div class="opt-page-header">
     <div>
-      <span class="opt-page-eyebrow">Planlama Panosu</span>
-      <h1 class="opt-page-title">Aylik Gorev Plani</h1>
+      <span class="opt-page-eyebrow">{{ t('Planlama Panosu') }}</span>
+      <h1 class="opt-page-title">{{ t('Aylık Görev Planı') }}</h1>
       <p class="opt-page-subtitle">
-        Klinik sefi olarak ekip mesai ve nobetlerini dengeli sekilde paylastirin. Secili donem: {{ selected_month_label }} {{ selected_year }}.
+        {{ t('Klinik şefi olarak ekip mesai ve nöbetlerini dengeli şekilde paylaştırın. Seçili dönem: {month} {year}', month=selected_month_label, year=selected_year) }}
       </p>
     </div>
     <div class="opt-page-actions">
@@ -18,7 +18,7 @@
         class="btn btn-outline-primary btn-sm {% if excel_disabled %}disabled opt-disabled-link{% endif %}"
         {% if excel_disabled %}aria-disabled="true" tabindex="-1"{% endif %}
       >
-        Excel Indir
+        {{ t('Excel İndir') }}
       </a>
     </div>
   </div>
@@ -37,14 +37,14 @@
 
   <section class="opt-surface-card">
     <header class="opt-toolbar">
-      <h2 class="opt-toolbar-title">Plan Parametreleri</h2>
+      <h2 class="opt-toolbar-title">{{ t('Plan Parametreleri') }}</h2>
     </header>
     {% if error %}
       <div class="alert alert-danger opt-alert" role="alert">{{ error }}</div>
     {% endif %}
     <form method="get" action="{{ url_for('planla') }}" class="opt-form-grid opt-form-grid--cols-2">
       <div class="opt-form-grid__full">
-        <label class="form-label">Plan Turu</label>
+        <label class="form-label">{{ t('Plan Türü') }}</label>
         <div class="opt-segmented-control">
           {% for value, label in plan_type_options %}
             {% set input_id = 'plan-type-' ~ value %}
@@ -57,19 +57,16 @@
               {% if value == selected_plan_type %}checked{% endif %}
             >
             <label class="opt-segmented-control__item{% if value == selected_plan_type %} is-active{% endif %}" for="{{ input_id }}">
-              <span class="opt-segmented-control__label">{{ label }}</span>
-              {% if value != 'clinic' %}
-                <span class="opt-pill opt-pill--upcoming">Yakinda</span>
-              {% endif %}
+              <span class="opt-segmented-control__label">{{ t(label) }}</span>
             </label>
           {% endfor %}
         </div>
         {% if selected_plan_type == 'nobet' %}
-          <p class="opt-plan-note">Cap nobeti uzmanlar arasinda sirayla pay edilir.</p>
+          <p class="opt-plan-note">{{ t('İcap nöbeti uzmanlar arasında sırayla paylaştırılır.') }}</p>
         {% endif %}
       </div>
       <div>
-        <label class="form-label" for="year">Yil</label>
+        <label class="form-label" for="year">{{ t('Yıl') }}</label>
         <select id="year" name="year" class="form-select">
           {% for year in year_options %}
             <option value="{{ year }}" {% if year == selected_year %}selected{% endif %}>{{ year }}</option>
@@ -77,23 +74,23 @@
         </select>
       </div>
       <div>
-        <label class="form-label" for="month">Ay</label>
+        <label class="form-label" for="month">{{ t('Ay') }}</label>
         <select id="month" name="month" class="form-select">
           {% for value, label in month_options %}
-            <option value="{{ value }}" {% if value == selected_month %}selected{% endif %}>{{ label }}</option>
+            <option value="{{ value }}" {% if value == selected_month %}selected{% endif %}>{{ t(label) }}</option>
           {% endfor %}
         </select>
       </div>
       <div class="opt-form-grid__full">
         <div class="opt-floating-actions">
-          <button type="submit" class="btn btn-primary btn-lg">Plan Olustur</button>
+          <button type="submit" class="btn btn-primary btn-lg">{{ t('Plan Oluştur') }}</button>
           {% set excel_disabled = error %}
           <a
             href="{{ download_url }}"
             class="btn btn-outline-primary btn-lg {% if excel_disabled %}disabled opt-disabled-link{% endif %}"
             {% if excel_disabled %}aria-disabled="true" tabindex="-1"{% endif %}
           >
-            Excel Indir
+            {{ t('Excel İndir') }}
           </a>
         </div>
       </div>
@@ -103,14 +100,14 @@
   {% if result %}
     <section class="opt-surface-card">
       <header class="opt-toolbar">
-        <h2 class="opt-toolbar-title">Plan Ozet</h2>
-        <span class="opt-pill opt-pill--success">{{ result.status_label or 'Hazir' }}</span>
+        <h2 class="opt-toolbar-title">{{ t('Plan Özeti') }}</h2>
+        <span class="opt-pill opt-pill--success">{{ t(result.status_label or 'Hazır') }}</span>
       </header>
       <ul class="opt-summary">
-        <li><strong>Durum:</strong> {{ result.status_label or '-' }}</li>
-        <li><strong>Hedef:</strong> {{ result.objective_value|round(0) }}</li>
-        <li><strong>Donem:</strong> {{ selected_month_label }} {{ selected_year }}</li>
-        <li><strong>Plan:</strong> {{ selected_plan_type_label }}</li>
+        <li><strong>{{ t('Durum') }}:</strong> {{ t(result.status_label or '-') }}</li>
+        <li><strong>{{ t('Hedef') }}:</strong> {{ result.objective_value|round(0) }}</li>
+        <li><strong>{{ t('Dönem') }}:</strong> {{ t('{month} {year}', month=selected_month_label, year=selected_year) }}</li>
+        <li><strong>{{ t('Plan') }}:</strong> {{ t(selected_plan_type_label) }}</li>
       </ul>
       {% if result.text %}
         <pre class="opt-plan-text">{{ result.text }}</pre>
@@ -123,13 +120,13 @@
         </div>
       {% endif %}
       {% if result.cap_summary %}
-        <h3 class="opt-section-title mt-4">Cap Nobeti Dagilimi</h3>
+        <h3 class="opt-section-title mt-4">{{ t('İcap Nöbeti Dağılımı') }}</h3>
         <div class="opt-table-wrapper">
           <table class="table table-hover align-middle mb-0">
             <thead>
               <tr>
                 {% for header in result.cap_summary[0].keys() %}
-                  <th>{{ header }}</th>
+                  <th>{{ t(header) }}</th>
                 {% endfor %}
               </tr>
             </thead>
@@ -146,13 +143,13 @@
         </div>
       {% endif %}
       {% if result.night_summary %}
-        <h3 class="opt-section-title mt-4">Gece Nobeti Dagilimi</h3>
+        <h3 class="opt-section-title mt-4">{{ t('Gece Nöbeti Dağılımı') }}</h3>
         <div class="opt-table-wrapper">
           <table class="table table-hover align-middle mb-0">
             <thead>
               <tr>
                 {% for header in result.night_summary[0].keys() %}
-                  <th>{{ header }}</th>
+                  <th>{{ t(header) }}</th>
                 {% endfor %}
               </tr>
             </thead>
@@ -174,16 +171,16 @@
   {% if result and selected_plan_type == 'clinic' %}
     <section class="opt-surface-card">
       <header class="opt-toolbar">
-        <h2 class="opt-toolbar-title">Plani Onayla</h2>
+        <h2 class="opt-toolbar-title">{{ t('Planı Onayla') }}</h2>
       </header>
       <p class="opt-plan-note mb-3">
-        Onaylanan planin atamalari {{ plan_period }} donemi icin saklanir ve gelecek ayin adalet hesabinda kullanilir.
+        {{ t('Onaylanan planın atamaları {period} dönemi için saklanır ve gelecek ayın adalet hesabında kullanılır.', period=plan_period) }}
       </p>
       <form method="post" action="{{ url_for('planla_approve') }}" class="opt-floating-actions">
         <input type="hidden" name="year" value="{{ selected_year }}">
         <input type="hidden" name="month" value="{{ selected_month }}">
         <input type="hidden" name="plan_type" value="{{ selected_plan_type }}">
-        <button type="submit" class="btn btn-success btn-lg">Plani Onayla ve Kaydet</button>
+        <button type="submit" class="btn btn-success btn-lg">{{ t('Planı Onayla ve Kaydet') }}</button>
       </form>
     </section>
   {% endif %}
@@ -191,15 +188,15 @@
   {% if plan_table %}
     <section class="opt-surface-card">
       <header class="opt-toolbar">
-        <h2 class="opt-toolbar-title">Gunluk Plan Tablosu</h2>
-        <p class="opt-plan-note mb-0">Tabloyu Excel olarak paylasmak icin Excel Indir secenegini kullanabilirsiniz.</p>
+        <h2 class="opt-toolbar-title">{{ t('Günlük Plan Tablosu') }}</h2>
+        <p class="opt-plan-note mb-0">{{ t('Tabloyu Excel olarak dışa aktarmak için üstteki Excel İndir seçeneğini kullanın.') }}</p>
       </header>
       <div class="opt-table-wrapper">
         <table class="table table-striped align-middle">
           <thead>
             <tr>
               {% for header in plan_table.headers %}
-                <th scope="col">{{ header }}</th>
+                <th scope="col">{{ t(header) }}</th>
               {% endfor %}
             </tr>
           </thead>

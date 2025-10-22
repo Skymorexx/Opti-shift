@@ -1,18 +1,18 @@
 {% extends "layout.html" %}
 
-{% block title %}Opti-shift | Personel{% endblock %}
+{% block title %}{{ t('Opti-Shift | Personel') }}{% endblock %}
 
 {% block page_header %}
   <div class="opt-page-header">
     <div>
-      <span class="opt-page-eyebrow">Ekip Yonetimi</span>
-      <h1 class="opt-page-title">Personel Paneli</h1>
+      <span class="opt-page-eyebrow">{{ t('Ekip Yönetimi') }}</span>
+      <h1 class="opt-page-title">{{ t('Personel Paneli') }}</h1>
       <p class="opt-page-subtitle">
-        Klinik ekibinizi guncel tutun, gorev sinirlarini ve kidem kurallarini yonetin.
+        {{ t('Klinik ekibinizi güncel tutun, görev sınırlarını ve kıdem kurallarını yönetin.') }}
       </p>
     </div>
     <div class="opt-page-actions">
-      <span class="opt-page-meta">Toplam personel: {{ staff|length }}</span>
+      <span class="opt-page-meta">{{ t('Toplam personel: {count}', count=staff|length) }}</span>
     </div>
   </div>
 {% endblock %}
@@ -20,7 +20,7 @@
 {% block content %}
   <section class="opt-surface-card">
     <header class="opt-toolbar">
-      <h2 class="opt-toolbar-title">Yeni Personel Ekle</h2>
+      <h2 class="opt-toolbar-title">{{ t('Yeni Personel Ekle') }}</h2>
     </header>
     {% if error %}
       <div class="alert alert-danger opt-alert" role="alert">{{ error }}</div>
@@ -28,39 +28,39 @@
     <form method="post" action="{{ url_for('personel') }}" class="opt-form-grid opt-form-grid--cols-2">
       <input type="hidden" name="action" value="add">
       <div>
-        <label class="form-label" for="name">Ad Soyad</label>
-        <input type="text" id="name" name="name" class="form-control" placeholder="Orn: Dr. Ahmet Vural" required>
+        <label class="form-label" for="name">{{ t('Ad Soyad') }}</label>
+        <input type="text" id="name" name="name" class="form-control" placeholder="{{ t('Örn: Dr. Ahmet Vural') }}" required>
       </div>
       <div>
-        <label class="form-label" for="title">Unvan</label>
+        <label class="form-label" for="title">{{ t('Ünvan') }}</label>
         <select id="title" name="title" class="form-select" required>
           {% for option in title_options %}
-            <option value="{{ option }}">{{ option }}</option>
+            <option value="{{ option }}">{{ t(option) }}</option>
           {% endfor %}
         </select>
       </div>
       <div id="seniority-group" style="display: none;">
-        <label class="form-label" for="seniority">Kidem</label>
+        <label class="form-label" for="seniority">{{ t('Kıdem') }}</label>
         <select id="seniority" name="seniority" class="form-select">
-          <option value="">Kidem secin</option>
+          <option value="">{{ t('Kıdem seçin') }}</option>
           {% for value, label in seniority_options %}
-            <option value="{{ value }}">{{ label }}</option>
+            <option value="{{ value }}">{{ t(label) }}</option>
           {% endfor %}
         </select>
       </div>
       <div id="night-limits" class="opt-form-grid opt-form-grid--cols-2" style="display: none;">
         <div>
-          <label class="form-label" for="min_night">Minimum Aylik Nobet</label>
-          <input type="number" id="min_night" name="min_night" min="0" class="form-control" placeholder="Orn: 2">
+          <label class="form-label" for="min_night">{{ t('Minimum Aylık Nöbet') }}</label>
+          <input type="number" id="min_night" name="min_night" min="0" class="form-control" placeholder="{{ t('Örn: 2') }}">
         </div>
         <div>
-          <label class="form-label" for="max_night">Maksimum Aylik Nobet</label>
-          <input type="number" id="max_night" name="max_night" min="0" class="form-control" placeholder="Orn: 6">
+          <label class="form-label" for="max_night">{{ t('Maksimum Aylık Nöbet') }}</label>
+          <input type="number" id="max_night" name="max_night" min="0" class="form-control" placeholder="{{ t('Örn: 6') }}">
         </div>
       </div>
       <div class="opt-form-grid__full">
         <div class="opt-floating-actions">
-          <button type="submit" class="btn btn-primary btn-lg">Personel Ekle</button>
+          <button type="submit" class="btn btn-primary btn-lg">{{ t('Personel Ekle') }}</button>
         </div>
       </div>
     </form>
@@ -68,9 +68,9 @@
 
   <section class="opt-surface-card">
     <header class="opt-toolbar">
-      <h2 class="opt-toolbar-title">Personel Listesi</h2>
+      <h2 class="opt-toolbar-title">{{ t('Personel Listesi') }}</h2>
       {% if staff %}
-        <span class="opt-meta">{{ staff|length }} kayit goruntuleniyor</span>
+        <span class="opt-meta">{{ t('{count} kayıt görüntüleniyor', count=staff|length) }}</span>
       {% endif %}
     </header>
     {% if staff %}
@@ -79,12 +79,12 @@
           <thead>
             <tr>
               <th scope="col">#</th>
-              <th scope="col">Ad Soyad</th>
-              <th scope="col">Unvan</th>
-              <th scope="col">Kidem</th>
-              <th scope="col">Min Nobet</th>
-              <th scope="col">Max Nobet</th>
-              <th scope="col">Islemler</th>
+              <th scope="col">{{ t('Ad Soyad') }}</th>
+              <th scope="col">{{ t('Ünvan') }}</th>
+              <th scope="col">{{ t('Kıdem') }}</th>
+              <th scope="col">{{ t('Minimum Nöbet') }}</th>
+              <th scope="col">{{ t('Maksimum Nöbet') }}</th>
+              <th scope="col">{{ t('İşlemler') }}</th>
             </tr>
           </thead>
           <tbody>
@@ -93,8 +93,8 @@
               <tr>
                 <td>{{ person['id'] }}</td>
                 <td><strong>{{ person['name'] }}</strong></td>
-                <td>{{ person['title'] }}</td>
-                <td>{{ seniority_labels.get(seniority_value, '-') if seniority_value else '-' }}</td>
+                <td>{{ t(person['title']) }}</td>
+                <td>{{ t(seniority_labels.get(seniority_value, '-')) if seniority_value else '-' }}</td>
                 <td>{{ person["min_night_duties_per_month"] if person["min_night_duties_per_month"] is not none else '-' }}</td>
                 <td>{{ person["max_night_duties_per_month"] if person["max_night_duties_per_month"] is not none else '-' }}</td>
                 <td>
@@ -103,30 +103,30 @@
                       <form method="post" action="{{ url_for('personel') }}" class="opt-table-actions__form">
                         <input type="hidden" name="action" value="update">
                         <input type="hidden" name="staff_id" value="{{ person['id'] }}">
-                        <select name="seniority" class="form-select form-select-sm" aria-label="Kidem secin">
+                        <select name="seniority" class="form-select form-select-sm" aria-label="{{ t('Kıdem seçin') }}">
                           {% for value, label in seniority_options %}
-                            <option value="{{ value }}" {% if person['seniority'] == value %}selected{% endif %}>{{ label }}</option>
+                            <option value="{{ value }}" {% if person['seniority'] == value %}selected{% endif %}>{{ t(label) }}</option>
                           {% endfor %}
                         </select>
-                        <select name="min_night" class="form-select form-select-sm" aria-label="Minimum nobet">
-                          <option value="" {% if person['min_night_duties_per_month'] is none %}selected{% endif %}>Min yok</option>
+                        <select name="min_night" class="form-select form-select-sm" aria-label="{{ t('Minimum nöbet') }}">
+                          <option value="" {% if person['min_night_duties_per_month'] is none %}selected{% endif %}>{{ t('Alt sınır yok') }}</option>
                           {% for value in night_limit_options %}
                             <option value="{{ value }}" {% if person['min_night_duties_per_month'] == value %}selected{% endif %}>{{ value }}</option>
                           {% endfor %}
                         </select>
-                        <select name="max_night" class="form-select form-select-sm" aria-label="Maksimum nobet">
-                          <option value="" {% if person['max_night_duties_per_month'] is none %}selected{% endif %}>Max yok</option>
+                        <select name="max_night" class="form-select form-select-sm" aria-label="{{ t('Maksimum nöbet') }}">
+                          <option value="" {% if person['max_night_duties_per_month'] is none %}selected{% endif %}>{{ t('Üst sınır yok') }}</option>
                           {% for value in night_limit_options %}
                             <option value="{{ value }}" {% if person['max_night_duties_per_month'] == value %}selected{% endif %}>{{ value }}</option>
                           {% endfor %}
                         </select>
-                        <button type="submit" class="btn btn-outline-primary btn-sm">Kaydet</button>
+                        <button type="submit" class="btn btn-outline-primary btn-sm">{{ t('Kaydet') }}</button>
                       </form>
                     {% endif %}
                     <form method="post" action="{{ url_for('personel') }}">
                       <input type="hidden" name="action" value="delete">
                       <input type="hidden" name="staff_id" value="{{ person['id'] }}">
-                      <button type="submit" class="btn btn-outline-danger btn-sm">Sil</button>
+                      <button type="submit" class="btn btn-outline-danger btn-sm">{{ t('Sil') }}</button>
                     </form>
                   </div>
                 </td>
@@ -137,7 +137,7 @@
       </div>
     {% else %}
       <div class="opt-empty-state">
-        <p>Henuz kayitli personel bulunmuyor. Once ekip arkadaslarinizi ekleyin.</p>
+        <p>{{ t('Henüz kayıtlı personel bulunmuyor. Önce ekip arkadaşlarınızı ekleyin.') }}</p>
       </div>
     {% endif %}
   </section>

@@ -762,11 +762,11 @@ def add_clinic_seniority_rule(
     """Insert a seniority rule for a clinic."""
     seniority = (required_seniority or "").strip().lower()
     if seniority not in {"comez", "ara", "kidemli"}:
-        raise ValueError("Gecersiz kidem seviyesi.")
+        raise ValueError("Geçersiz kıdem seviyesi.")
     try:
         normalized_count = int(count)
     except (TypeError, ValueError) as exc:  # pragma: no cover - defensive parsing
-        raise ValueError("Gecersiz adet degeri.") from exc
+        raise ValueError("Geçersiz adet değeri.") from exc
     normalized_count = max(0, normalized_count)
     with get_connection() as conn:
         clinic_row = conn.execute(
@@ -774,7 +774,7 @@ def add_clinic_seniority_rule(
             (clinic_id, unit_id),
         ).fetchone()
         if not clinic_row:
-            raise ValueError("Klinik bu tenant icin bulunamadi.")
+            raise ValueError("Klinik bu tenant için bulunamadı.")
         cursor = conn.execute(
             """
             INSERT INTO clinic_seniority_rules (clinic_id, required_seniority, required_count, unit_id)
@@ -828,7 +828,7 @@ def add_leave_request(
             (staff_id, unit_id),
         ).fetchone()
         if not staff_row:
-            raise ValueError("Personel bu tenant icin bulunamadi.")
+            raise ValueError("Personel bu tenant için bulunamadı.")
         cursor = conn.execute(
             """
             INSERT INTO leave_requests (staff_id, start_date, end_date, reason, unit_id)

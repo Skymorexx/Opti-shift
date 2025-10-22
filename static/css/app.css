@@ -42,6 +42,35 @@ body {
   color: var(--opt-primary);
 }
 
+.opt-lang-switcher {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.opt-lang-switcher__item {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.2rem 0.6rem;
+  border-radius: 0.75rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--opt-muted);
+  text-decoration: none;
+  transition: all 0.2s ease;
+}
+
+.opt-lang-switcher__item:hover,
+.opt-lang-switcher__item:focus {
+  color: var(--opt-primary);
+}
+
+.opt-lang-switcher__item.is-active {
+  background: rgba(15, 110, 220, 0.12);
+  color: var(--opt-primary);
+}
+
 .opt-navbar-tag {
   display: inline-flex;
   align-items: center;

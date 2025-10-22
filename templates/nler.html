@@ -1,18 +1,18 @@
 {% extends "layout.html" %}
 
-{% block title %}Opti-shift | Izinler{% endblock %}
+{% block title %}{{ t('Opti-Shift | İzinler') }}{% endblock %}
 
 {% block page_header %}
   <div class="opt-page-header">
     <div>
-      <span class="opt-page-eyebrow">Planlama Dengelemesi</span>
-      <h1 class="opt-page-title">Izin Kayitlari</h1>
+      <span class="opt-page-eyebrow">{{ t('Planlama Dengesi') }}</span>
+      <h1 class="opt-page-title">{{ t('İzin Kayıtları') }}</h1>
       <p class="opt-page-subtitle">
-        Personelin izinlerini takip ederek planlama motorunun guncel verilerle calismasini saglayin.
+        {{ t('Personel izinlerini takip ederek planlama motorunun güncel verilerle çalışmasını sağlayın.') }}
       </p>
     </div>
     <div class="opt-page-actions">
-      <span class="opt-page-meta">Aktif izin kaydi: {{ leaves|length }}</span>
+      <span class="opt-page-meta">{{ t('Aktif izin kaydı: {count}', count=leaves|length) }}</span>
     </div>
   </div>
 {% endblock %}
@@ -20,7 +20,7 @@
 {% block content %}
   <section class="opt-surface-card">
     <header class="opt-toolbar">
-      <h2 class="opt-toolbar-title">Kayitli Izinler</h2>
+      <h2 class="opt-toolbar-title">{{ t('Kayıtlı İzinler') }}</h2>
     </header>
     {% if error %}
       <div class="alert alert-danger opt-alert mb-3" role="alert">{{ error }}</div>
@@ -31,28 +31,26 @@
           <thead>
             <tr>
               <th scope="col">#</th>
-              <th scope="col">Personel</th>
-              <th scope="col">Baslangic</th>
-              <th scope="col">Bitis</th>
-              <th scope="col">Sebep</th>
-              <th scope="col">Islem</th>
+              <th scope="col">{{ t('Personel') }}</th>
+              <th scope="col">{{ t('Başlangıç') }}</th>
+              <th scope="col">{{ t('Bitiş') }}</th>
+              <th scope="col">{{ t('Sebep') }}</th>
+              <th scope="col">{{ t('İşlem') }}</th>
             </tr>
           </thead>
           <tbody>
             {% for leave in leaves %}
               <tr>
                 <td>{{ leave["id"] }}</td>
-                <td>
-                  <strong>{{ leave["staff_name"] }}</strong>
-                </td>
+                <td>{{ leave["staff_name"] }}</td>
                 <td>{{ leave["start_date"] }}</td>
                 <td>{{ leave["end_date"] }}</td>
                 <td>{{ leave["reason"] or '-' }}</td>
                 <td>
-                  <form method="post" action="{{ url_for('nler') }}">
+                  <form method="post" action="{{ url_for('izinler') }}">
                     <input type="hidden" name="action" value="delete">
                     <input type="hidden" name="leave_id" value="{{ leave['id'] }}">
-                    <button type="submit" class="btn btn-outline-danger btn-sm">Sil</button>
+                    <button type="submit" class="btn btn-outline-danger btn-sm">{{ t('Sil') }}</button>
                   </form>
                 </td>
               </tr>
@@ -62,35 +60,35 @@
       </div>
     {% else %}
       <div class="opt-empty-state">
-        <p>Henuz izin kaydi bulunmuyor.</p>
+        <p>{{ t('Henüz izin kaydı bulunmuyor.') }}</p>
       </div>
     {% endif %}
   </section>
 
   <section class="opt-surface-card">
     <header class="opt-toolbar">
-      <h2 class="opt-toolbar-title">Yeni Izin Ekle</h2>
+      <h2 class="opt-toolbar-title">{{ t('Yeni İzin Ekle') }}</h2>
     </header>
     {% if not staff %}
       <div class="opt-status-banner opt-status-banner--error mb-3">
-        Once personel ekleyin. Personel olmadan izin olusturulamaz.
+        {{ t('Önce personel ekleyin. Personel olmadan izin oluşturulamaz.') }}
       </div>
     {% endif %}
-    <form method="post" action="{{ url_for('nler') }}" class="opt-form-grid opt-form-grid--cols-2">
+      <form method="post" action="{{ url_for('izinler') }}" class="opt-form-grid opt-form-grid--cols-2">
       <input type="hidden" name="action" value="add">
       <div>
-        <label class="form-label" for="staff_id">Personel</label>
+        <label class="form-label" for="staff_id">{{ t('Personel') }}</label>
         <select id="staff_id" name="staff_id" class="form-select" {% if not staff %}disabled{% endif %}>
-          <option value="">Personel secin</option>
+          <option value="">{{ t('Personel seçin') }}</option>
           {% for member in staff %}
             <option value="{{ member['id'] }}" {% if form_defaults.staff_id == member['id'] | string %}selected{% endif %}>
-              {{ member['name'] }} ({{ member['title'] }})
+              {{ member['name'] }} ({{ t(member['title']) }})
             </option>
           {% endfor %}
         </select>
       </div>
       <div>
-        <label class="form-label" for="start_date">Baslangic Tarihi</label>
+        <label class="form-label" for="start_date">{{ t('Başlangıç Tarihi') }}</label>
         <input
           type="date"
           id="start_date"
@@ -101,7 +99,7 @@
         >
       </div>
       <div>
-        <label class="form-label" for="end_date">Bitis Tarihi</label>
+        <label class="form-label" for="end_date">{{ t('Bitiş Tarihi') }}</label>
         <input
           type="date"
           id="end_date"
@@ -112,19 +110,20 @@
         >
       </div>
       <div>
-        <label class="form-label" for="reason">Sebep (opsiyonel)</label>
+        <label class="form-label" for="reason">{{ t('Sebep (opsiyonel)') }}</label>
         <textarea
           id="reason"
           name="reason"
           class="form-control"
-          placeholder="Orn: kongre, tatil"
+          placeholder="{{ t('Örn: Kongre, Tatil') }}"
           rows="3"
-          {% if not staff %}disabled{% endif %}>{{ form_defaults.reason }}</textarea>
+          {% if not staff %}disabled{% endif %}
+        >{{ form_defaults.reason }}</textarea>
       </div>
       <div class="opt-form-grid__full">
         <div class="opt-floating-actions">
-          <button type="submit" class="btn btn-success btn-lg" {% if not staff %}disabled{% endif %}>Izin Kaydet</button>
-          <p class="opt-plan-note mb-0">Bitis tarihi dahil edilerek personel bu gunlerde planlamaya alinmaz.</p>
+          <button type="submit" class="btn btn-success btn-lg" {% if not staff %}disabled{% endif %}>{{ t('İzin Kaydet') }}</button>
+          <p class="opt-plan-note mb-0">{{ t('Bitiş tarihi dahil edilerek personel bu günlerde planlamaya alınmaz.') }}</p>
         </div>
       </div>
     </form>

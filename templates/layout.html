@@ -28,35 +28,45 @@
             {% set endpoint = request.endpoint %}
             <ul class="navbar-nav me-auto mb-2 mb-lg-0">
               <li class="nav-item">
-                <a class="nav-link {% if endpoint in ['planla', 'planla_approve'] %}active{% endif %}" href="{{ url_for('planla') }}">Planlama</a>
+                <a class="nav-link {% if endpoint in ['planla', 'planla_approve'] %}active{% endif %}" href="{{ url_for('planla') }}">{{ t('Planlama') }}</a>
               </li>
               <li class="nav-item">
-                <a class="nav-link {% if endpoint == 'personel' %}active{% endif %}" href="{{ url_for('personel') }}">Personel</a>
+                <a class="nav-link {% if endpoint == 'personel' %}active{% endif %}" href="{{ url_for('personel') }}">{{ t('Personel') }}</a>
               </li>
               <li class="nav-item">
-                <a class="nav-link {% if endpoint == 'klinikler' %}active{% endif %}" href="{{ url_for('klinikler') }}">Klinikler</a>
+                <a class="nav-link {% if endpoint == 'klinikler' %}active{% endif %}" href="{{ url_for('klinikler') }}">{{ t('Klinikler') }}</a>
               </li>
               <li class="nav-item">
-                <a class="nav-link {% if endpoint == 'nobetler' %}active{% endif %}" href="{{ url_for('nobetler') }}">Nöbet Türleri</a>
+                <a class="nav-link {% if endpoint == 'nobetler' %}active{% endif %}" href="{{ url_for('nobetler') }}">{{ t('Nöbet Türleri') }}</a>
               </li>
               <li class="nav-item">
-                <a class="nav-link {% if endpoint == 'nler' %}active{% endif %}" href="{{ url_for('nler') }}">İzinler</a>
+                <a class="nav-link {% if endpoint == 'izinler' %}active{% endif %}" href="{{ url_for('izinler') }}">{{ t('İzinler') }}</a>
               </li>
             </ul>
             <div class="d-flex align-items-center gap-3 mt-3 mt-lg-0">
+              <div class="opt-lang-switcher">
+                {% for code, label in language_options %}
+                  {% set target = request.full_path if request.query_string else request.path %}
+                  {% if code == current_language %}
+                    <span class="opt-lang-switcher__item is-active">{{ label }}</span>
+                  {% else %}
+                    <a class="opt-lang-switcher__item" href="{{ url_for('set_language', lang=code, next=target) }}">{{ label }}</a>
+                  {% endif %}
+                {% endfor %}
+              </div>
               {% if current_username %}
                 <div class="opt-avatar d-none d-lg-flex">
                   {{ (current_username or 'M')[:1]|upper }}
                 </div>
                 <div class="opt-user-meta text-end">
                   <strong>{{ current_username }}</strong>
-                  <span>{{ current_unit_name or 'Ünite seçilmedi' }}</span>
+                  <span>{{ current_unit_name or t('Ünite seçilmedi') }}</span>
                 </div>
-                <a class="btn btn-outline-danger btn-sm" href="{{ url_for('logout') }}">Çıkış Yap</a>
+                <a class="btn btn-outline-danger btn-sm" href="{{ url_for('logout') }}">{{ t('Çıkış Yap') }}</a>
               {% else %}
-                <a class="btn btn-primary btn-sm" href="{{ url_for('login') }}">Giriş Yap</a>
+                <a class="btn btn-primary btn-sm" href="{{ url_for('login') }}">{{ t('Giriş Yap') }}</a>
               {% endif %}
-              <span class="opt-navbar-tag">Alpha v0.11</span>
+              <span class="opt-navbar-tag">{{ t('Alpha v0.2') }}</span>
             </div>
           </div>
         </div>

@@ -1,18 +1,18 @@
 {% extends "layout.html" %}
 
-{% block title %}Opti-shift | Klinikler{% endblock %}
+{% block title %}{{ t('Opti-Shift | Klinikler') }}{% endblock %}
 
 {% block page_header %}
   <div class="opt-page-header">
     <div>
-      <span class="opt-page-eyebrow">Kadro Planlama</span>
-      <h1 class="opt-page-title">Klinik Yonetimi</h1>
+      <span class="opt-page-eyebrow">{{ t('Kadro Planlama') }}</span>
+      <h1 class="opt-page-title">{{ t('Klinik Yönetimi') }}</h1>
       <p class="opt-page-subtitle">
-        Klinik tanimlarini, sorumlu uzmanlari ve kidem kurallarini buradan duzenleyin.
+        {{ t('Klinik tanımlarını, sorumlu uzmanları ve kıdem kurallarını buradan düzenleyin.') }}
       </p>
     </div>
     <div class="opt-page-actions">
-      <span class="opt-page-meta">Toplam klinik: {{ clinics|length }}</span>
+      <span class="opt-page-meta">{{ t('Toplam klinik: {count}', count=clinics|length) }}</span>
     </div>
   </div>
 {% endblock %}
@@ -20,7 +20,7 @@
 {% block content %}
   <section class="opt-surface-card">
     <header class="opt-toolbar">
-      <h2 class="opt-toolbar-title">Yeni Klinik Ekle</h2>
+      <h2 class="opt-toolbar-title">{{ t('Yeni Klinik Ekle') }}</h2>
     </header>
     {% if error %}
       <div class="alert alert-danger opt-alert" role="alert">{{ error }}</div>
@@ -28,25 +28,25 @@
     <form method="post" action="{{ url_for('klinikler') }}" class="opt-form-grid opt-form-grid--cols-2">
       <input type="hidden" name="action" value="add">
       <div>
-        <label class="form-label" for="name">Klinik Adi</label>
-        <input type="text" id="name" name="name" class="form-control" placeholder="Orn: Dermatoloji" required>
+        <label class="form-label" for="name">{{ t('Klinik Adı') }}</label>
+        <input type="text" id="name" name="name" class="form-control" placeholder="{{ t('Örn: Dermatoloji') }}" required>
       </div>
       <div>
-        <label class="form-label" for="required_assistants">Gerekli Asistan</label>
+        <label class="form-label" for="required_assistants">{{ t('Gerekli Asistan Sayısı') }}</label>
         <input type="number" id="required_assistants" name="required_assistants" class="form-control" value="1" min="1" required>
       </div>
       <div>
-        <label class="form-label" for="rotation_period">Rotasyon Periyodu</label>
+        <label class="form-label" for="rotation_period">{{ t('Rotasyon Periyodu') }}</label>
         <select id="rotation_period" name="rotation_period" class="form-select">
           {% for value, label in rotation_options %}
-            <option value="{{ value }}" {% if value == default_rotation %}selected{% endif %}>{{ label }}</option>
+            <option value="{{ value }}" {% if value == default_rotation %}selected{% endif %}>{{ t(label) }}</option>
           {% endfor %}
         </select>
       </div>
       <div>
-        <label class="form-label" for="responsible_specialist">Sorumlu Uzman</label>
+        <label class="form-label" for="responsible_specialist">{{ t('Sorumlu Uzman') }}</label>
         <select id="responsible_specialist" name="responsible_specialist" class="form-select">
-          <option value="">Uzman secin</option>
+          <option value="">{{ t('Uzman seçin') }}</option>
           {% for specialist in specialists %}
             <option value="{{ specialist['id'] }}">{{ specialist['name'] }}</option>
           {% endfor %}
@@ -54,7 +54,7 @@
       </div>
       <div class="opt-form-grid__full">
         <div class="opt-floating-actions">
-          <button type="submit" class="btn btn-primary btn-lg">Klinik Ekle</button>
+          <button type="submit" class="btn btn-primary btn-lg">{{ t('Klinik Ekle') }}</button>
         </div>
       </div>
     </form>
@@ -62,9 +62,9 @@
 
   <section class="opt-surface-card">
     <header class="opt-toolbar">
-      <h2 class="opt-toolbar-title">Kayitli Klinikler</h2>
+      <h2 class="opt-toolbar-title">{{ t('Kayıtlı Klinikler') }}</h2>
       {% if clinics %}
-        <span class="opt-meta">{{ clinics|length }} klinik listeleniyor</span>
+        <span class="opt-meta">{{ t('{count} klinik listeleniyor', count=clinics|length) }}</span>
       {% endif %}
     </header>
     {% if clinics %}
@@ -75,24 +75,27 @@
               <div>
                 <h3 class="opt-clinic-card__title">{{ clinic['name'] }}</h3>
                 <p class="opt-meta mb-0">
-                  Gerekli asistan: {{ clinic['required_assistants'] or 1 }} • Rotasyon: {{ clinic['rotation_period_label'] }}
+                  {{ t('Gerekli asistan: {count} • Rotasyon: {rotation}', count=clinic['required_assistants'] or 1, rotation=t(clinic['rotation_period_label'])) }}
                 </p>
+                {% if clinic['responsible_name'] %}
+                  <p class="opt-meta mb-0">{{ t('Sorumlu uzman: {name}', name=clinic['responsible_name']) }}</p>
+                {% endif %}
               </div>
               <div class="opt-clinic-card__actions">
                 <form method="post" action="{{ url_for('klinikler') }}">
                   <input type="hidden" name="action" value="move_up">
                   <input type="hidden" name="clinic_id" value="{{ clinic['id'] }}">
-                  <button type="submit" class="btn btn-outline-secondary btn-sm" {% if loop.first %}disabled{% endif %}>Yukari</button>
+                  <button type="submit" class="btn btn-outline-secondary btn-sm" {% if loop.first %}disabled{% endif %}>{{ t('Yukarı') }}</button>
                 </form>
                 <form method="post" action="{{ url_for('klinikler') }}">
                   <input type="hidden" name="action" value="move_down">
                   <input type="hidden" name="clinic_id" value="{{ clinic['id'] }}">
-                  <button type="submit" class="btn btn-outline-secondary btn-sm" {% if loop.last %}disabled{% endif %}>Asagi</button>
+                  <button type="submit" class="btn btn-outline-secondary btn-sm" {% if loop.last %}disabled{% endif %}>{{ t('Aşağı') }}</button>
                 </form>
                 <form method="post" action="{{ url_for('klinikler') }}">
                   <input type="hidden" name="action" value="delete">
                   <input type="hidden" name="clinic_id" value="{{ clinic['id'] }}">
-                  <button type="submit" class="btn btn-outline-danger btn-sm">Sil</button>
+                  <button type="submit" class="btn btn-outline-danger btn-sm">{{ t('Sil') }}</button>
                 </form>
               </div>
             </div>
@@ -102,7 +105,7 @@
                 <input type="hidden" name="clinic_id" value="{{ clinic['id'] }}">
                 <div class="opt-form-grid opt-form-grid--cols-2">
                   <div>
-                    <label class="form-label" for="required_assistants_{{ clinic['id'] }}">Gerekli Asistan</label>
+                    <label class="form-label" for="required_assistants_{{ clinic['id'] }}">{{ t('Gerekli Asistan') }}</label>
                     <input
                       type="number"
                       id="required_assistants_{{ clinic['id'] }}"
@@ -114,17 +117,17 @@
                     >
                   </div>
                   <div>
-                    <label class="form-label" for="rotation_period_{{ clinic['id'] }}">Rotasyon Periyodu</label>
+                    <label class="form-label" for="rotation_period_{{ clinic['id'] }}">{{ t('Rotasyon Periyodu') }}</label>
                     <select id="rotation_period_{{ clinic['id'] }}" name="rotation_period" class="form-select form-select-sm">
                       {% for value, label in rotation_options %}
-                        <option value="{{ value }}" {% if value == clinic['rotation_period'] %}selected{% endif %}>{{ label }}</option>
+                        <option value="{{ value }}" {% if value == clinic['rotation_period'] %}selected{% endif %}>{{ t(label) }}</option>
                       {% endfor %}
                     </select>
                   </div>
                   <div>
-                    <label class="form-label" for="responsible_specialist_{{ clinic['id'] }}">Sorumlu Uzman</label>
+                    <label class="form-label" for="responsible_specialist_{{ clinic['id'] }}">{{ t('Sorumlu Uzman') }}</label>
                     <select id="responsible_specialist_{{ clinic['id'] }}" name="responsible_specialist" class="form-select form-select-sm">
-                      <option value="">Uzman secin</option>
+                      <option value="">{{ t('Uzman seçin') }}</option>
                       {% for specialist in specialists %}
                         <option value="{{ specialist['id'] }}" {% if clinic['sorumlu_uzman_id'] == specialist['id'] %}selected{% endif %}>
                           {{ specialist['name'] }}
@@ -133,42 +136,42 @@
                     </select>
                   </div>
                   <div class="opt-clinic-update__actions">
-                    <button type="submit" class="btn btn-outline-primary btn-sm">Guncelle</button>
+                    <button type="submit" class="btn btn-outline-primary btn-sm">{{ t('Güncelle') }}</button>
                   </div>
                 </div>
               </form>
               <div class="opt-clinic-rules">
                 <div class="opt-clinic-rules__header">
-                  <h4>Kidem Kurallari</h4>
-                  <span class="opt-meta">Kidem bazli zorunlu sayilar</span>
+                  <h4>{{ t('Kıdem Kuralları') }}</h4>
+                  <span class="opt-meta">{{ t('Kıdem bazlı zorunlu sayılar') }}</span>
                 </div>
                 {% if clinic.seniority_rules %}
                   <ul class="opt-clinic-rules__list">
                     {% for rule in clinic.seniority_rules %}
                       <li>
-                        <span class="opt-badge">{{ rule["seniority_label"] }}</span>
-                        <span>{{ rule["required_count"] }} adet</span>
+                        <span class="opt-badge">{{ t(rule["seniority_label"]) }}</span>
+                        <span>{{ t('{count} adet', count=rule["required_count"]) }}</span>
                         <form method="post" action="{{ url_for('klinikler') }}">
                           <input type="hidden" name="action" value="delete_rule">
                           <input type="hidden" name="rule_id" value="{{ rule['id'] }}">
-                          <button type="submit" class="btn btn-link btn-sm text-danger">Sil</button>
+                          <button type="submit" class="btn btn-link btn-sm text-danger">{{ t('Sil') }}</button>
                         </form>
                       </li>
                     {% endfor %}
                   </ul>
                 {% else %}
-                  <p class="opt-meta mb-2">Henuz kural eklenmedi.</p>
+                  <p class="opt-meta mb-2">{{ t('Henüz kural eklenmedi.') }}</p>
                 {% endif %}
                 <form method="post" action="{{ url_for('klinikler') }}" class="opt-clinic-rules__form">
                   <input type="hidden" name="action" value="add_rule">
                   <input type="hidden" name="clinic_id" value="{{ clinic['id'] }}">
                   <select name="required_seniority" class="form-select form-select-sm">
                     {% for value, label in seniority_options %}
-                      <option value="{{ value }}">{{ label }}</option>
+                      <option value="{{ value }}">{{ t(label) }}</option>
                     {% endfor %}
                   </select>
                   <input type="number" name="required_count" class="form-control form-control-sm" value="1" min="1">
-                  <button type="submit" class="btn btn-outline-primary btn-sm">Ekle</button>
+                  <button type="submit" class="btn btn-outline-primary btn-sm">{{ t('Ekle') }}</button>
                 </form>
               </div>
             </div>
@@ -177,7 +180,7 @@
       </div>
     {% else %}
       <div class="opt-empty-state">
-        <p>Henuz klinik eklenmedi. Once ekip yapinizi olusturun.</p>
+        <p>{{ t('Henüz klinik eklenmedi. Önce ekip yapınızı oluşturun.') }}</p>
       </div>
     {% endif %}
   </section>

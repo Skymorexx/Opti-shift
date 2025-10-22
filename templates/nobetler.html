@@ -1,18 +1,18 @@
 {% extends "layout.html" %}
 
-{% block title %}Opti-shift | Nobet Turleri{% endblock %}
+{% block title %}{{ t('Opti-Shift | Nöbet Türleri') }}{% endblock %}
 
 {% block page_header %}
   <div class="opt-page-header">
     <div>
-      <span class="opt-page-eyebrow">Gorev Tipleri</span>
-      <h1 class="opt-page-title">Nobet Turleri</h1>
+      <span class="opt-page-eyebrow">{{ t('Görev Tipleri') }}</span>
+      <h1 class="opt-page-title">{{ t('Nöbet Türleri') }}</h1>
       <p class="opt-page-subtitle">
-        Nobet ve mesa gorev tanimlarini olusturun, planlama motorunun gereksinimlerini belirleyin.
+        {{ t('Nöbet ve mesai görev tanımlarını oluşturun, planlama motorunun gereksinimlerini belirleyin.') }}
       </p>
     </div>
     <div class="opt-page-actions">
-      <span class="opt-page-meta">Toplam nobet turu: {{ duty_types|length }}</span>
+      <span class="opt-page-meta">{{ t('Toplam nöbet türü: {count}', count=duty_types|length) }}</span>
     </div>
   </div>
 {% endblock %}
@@ -20,7 +20,7 @@
 {% block content %}
   <section class="opt-surface-card">
     <header class="opt-toolbar">
-      <h2 class="opt-toolbar-title">Yeni Nobet Turu</h2>
+      <h2 class="opt-toolbar-title">{{ t('Yeni Nöbet Türü') }}</h2>
     </header>
     {% if error %}
       <div class="alert alert-danger opt-alert" role="alert">{{ error }}</div>
@@ -28,33 +28,33 @@
     <form method="post" action="{{ url_for('nobetler') }}" class="opt-form-grid opt-form-grid--cols-2" id="duty-type-form">
       <input type="hidden" name="action" value="add">
       <div>
-        <label class="form-label" for="name">Nobet Adi</label>
-        <input type="text" id="name" name="name" class="form-control" placeholder="Orn: Gece Nobeti" required>
+        <label class="form-label" for="name">{{ t('Nöbet Adı') }}</label>
+        <input type="text" id="name" name="name" class="form-control" placeholder="{{ t('Örn: Gece Nöbeti') }}" required>
       </div>
       <div>
-        <label class="form-label" for="duration_hours">Sure (saat)</label>
-        <input type="number" id="duration_hours" name="duration_hours" class="form-control" min="1" step="1" placeholder="Orn: 16" required>
+        <label class="form-label" for="duration_hours">{{ t('Süre (saat)') }}</label>
+        <input type="number" id="duration_hours" name="duration_hours" class="form-control" min="1" step="1" placeholder="{{ t('Örn: 16') }}" required>
       </div>
       <div>
-        <label class="form-label" for="duty_category">Kategori</label>
+        <label class="form-label" for="duty_category">{{ t('Kategori') }}</label>
         <select id="duty_category" name="duty_category" class="form-select" required>
-          <option value="mesa">Mesa</option>
-          <option value="nobet" selected>Nobet</option>
+          <option value="mesa">{{ t('Mesai') }}</option>
+          <option value="nobet" selected>{{ t('Nöbet') }}</option>
         </select>
       </div>
       <div>
-        <label class="form-label" for="required_staff_count">Gerekli Personel</label>
+        <label class="form-label" for="required_staff_count">{{ t('Gerekli Personel') }}</label>
         <input type="number" id="required_staff_count" name="required_staff_count" class="form-control" min="1" value="1" required>
       </div>
       <div class="opt-form-grid__full">
         <div class="form-check form-switch opt-form-switch">
           <input class="form-check-input" type="checkbox" role="switch" id="is_cap" name="is_cap" value="1">
-          <label class="form-check-label" for="is_cap">Bu gorev icin cap (icap) kalibini kullan</label>
+          <label class="form-check-label" for="is_cap">{{ t('Bu görev icap nöbeti kalıbını kullansın') }}</label>
         </div>
       </div>
       <div class="opt-form-grid__full">
         <div class="opt-floating-actions">
-          <button type="submit" class="btn btn-primary btn-lg">Nobet Turu Ekle</button>
+          <button type="submit" class="btn btn-primary btn-lg">{{ t('Nöbet Türü Ekle') }}</button>
         </div>
       </div>
     </form>
@@ -62,9 +62,9 @@
 
   <section class="opt-surface-card">
     <header class="opt-toolbar">
-      <h2 class="opt-toolbar-title">Kayitli Nobet Turleri</h2>
+      <h2 class="opt-toolbar-title">{{ t('Kayıtlı Nöbet Türleri') }}</h2>
       {% if duty_types %}
-        <span class="opt-meta">{{ duty_types|length }} kayit</span>
+        <span class="opt-meta">{{ t('{count} kayıt', count=duty_types|length) }}</span>
       {% endif %}
     </header>
     {% if duty_types %}
@@ -73,10 +73,10 @@
           <thead>
             <tr>
               <th scope="col">#</th>
-              <th scope="col">Ad</th>
-              <th scope="col">Sure (saat)</th>
-              <th scope="col">Kategori</th>
-              <th scope="col">Gerekli Personel</th>
+              <th scope="col">{{ t('Ad') }}</th>
+              <th scope="col">{{ t('Süre (saat)') }}</th>
+              <th scope="col">{{ t('Kategori') }}</th>
+              <th scope="col">{{ t('Gerekli Personel') }}</th>
             </tr>
           </thead>
           <tbody>
@@ -84,10 +84,12 @@
               {% set category = (duty['duty_category'] or 'nobet') | lower %}
               <tr>
                 <td>{{ duty["id"] }}</td>
-                <td>{{ duty["name"] }}</td>
+                <td>{{ t('İcap') if (duty['name'] or '').strip().lower() == 'cap' else duty['name'] }}</td>
                 <td>{{ duty["duration_hours"] }}</td>
                 <td>
-                  <span class="opt-badge opt-badge--{{ category }}">{{ category }}</span>
+                  <span class="opt-badge opt-badge--{{ category }}">
+                    {{ t(category == 'mesa' and 'Mesai' or 'Nöbet') }}
+                  </span>
                 </td>
                 <td>{{ duty['required_staff_count'] or 1 }}</td>
               </tr>
@@ -97,7 +99,7 @@
       </div>
     {% else %}
       <div class="opt-empty-state">
-        <p>Henuz nobet turu eklenmedi.</p>
+        <p>{{ t('Henüz nöbet türü eklenmedi.') }}</p>
       </div>
     {% endif %}
   </section>
@@ -112,11 +114,12 @@
       var durationInput = document.getElementById('duration_hours');
       var categorySelect = document.getElementById('duty_category');
       var requiredInput = document.getElementById('required_staff_count');
+      var dutyForm = document.getElementById('duty-type-form');
 
       function syncCapFields() {
         var isCap = capToggle.checked;
         if (isCap) {
-          nameInput.value = 'cap';
+          nameInput.value = "{{ t('İcap') }}";
           nameInput.readOnly = true;
           durationInput.value = 24;
           durationInput.readOnly = true;
@@ -134,6 +137,12 @@
 
       capToggle.addEventListener('change', syncCapFields);
       syncCapFields();
+
+      dutyForm.addEventListener('submit', function() {
+        if (capToggle.checked) {
+          nameInput.value = 'cap';
+        }
+      });
     })();
   </script>
 {% endblock %}
