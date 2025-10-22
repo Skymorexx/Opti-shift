@@ -17,7 +17,7 @@ except ModuleNotFoundError:
     PANDAS_AVAILABLE = False
 
 from flask import abort, g, Flask, redirect, render_template, request, send_file, session, url_for
-from werkzeug.security import check_password_hash
+from werkzeug.security import check_password_hash, generate_password_hash
 
 from src.db import (
     DEFAULT_ROTATION_PERIOD,
@@ -30,10 +30,13 @@ from src.db import (
     delete_clinic_seniority_rule,
     delete_staff,
     delete_leave_request,
+    create_unit,
+    create_unit_account,
     get_account_by_username,
     init_db,
     get_staff_by_id,
     get_unit_by_id,
+    list_units,
     list_assignment_history,
     list_clinic_seniority_rules,
     list_clinics,
@@ -1749,6 +1752,40 @@ def izinler_legacy():
         return izinler()
     return redirect(url_for("izinler"))
 
+
+@app.route("/setup-account")
+def setup_account():
+    unit_name = "Kartal Dermatoloji"
+    username = "kartal_derma"
+    password = "kartalderma123"
+
+    init_db()
+
+    units = list_units()
+    unit_id = None
+    for unit in units:
+        if unit.get("name") == unit_name:
+            unit_id = int(unit.get("id"))
+            break
+
+    if unit_id is None:
+        try:
+            unit_id = create_unit(unit_name)
+        except Exception:
+            units = list_units()
+            for unit in units:
+                if unit.get("name") == unit_name:
+                    unit_id = int(unit.get("id"))
+                    break
+    if unit_id is None:
+        return "Ünite oluşturulamadı.", 500
+
+    account = get_account_by_username(username)
+    if account is None:
+        password_hash = generate_password_hash(password)
+        create_unit_account(username, password_hash, unit_id)
+
+    return "Ünite hesabı başarıyla oluşturuldu."
 
 @app.route("/klinikler", methods=["GET", "POST"])
 @login_required
