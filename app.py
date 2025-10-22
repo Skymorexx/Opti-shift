@@ -148,6 +148,27 @@ TRANSLATIONS = {
         "Aralık": "December",
 
         "İcap": "On-call duty",
+        "Kayıt Ol": "Sign Up",
+        "Yeni Ünite Hesabı": "Create New Unit Account",
+        "Ünite Adı": "Unit Name",
+        "Şifre Tekrar": "Confirm Password",
+        "Hesabınız yok mu?": "Don't have an account?",
+        "Lütfen ünite adı girin.": "Please enter a unit name.",
+        "Lütfen kullanıcı adı girin.": "Please enter a username.",
+        "Lütfen şifre girin.": "Please enter a password.",
+        "Şifre en az 8 karakter olmalıdır.": "Password must be at least 8 characters long.",
+        "Şifreler eşleşmiyor.": "Passwords do not match.",
+        "Bu ünite adı zaten kullanımda.": "This unit name is already in use.",
+        "Bu kullanıcı adı zaten kullanımda.": "This username is already in use.",
+        "Ünite oluşturulamadı.": "The unit could not be created.",
+        "Kullanıcı hesabı oluşturulamadı.": "The user account could not be created.",
+        "Ünite hesabı başarıyla oluşturuldu. Giriş yapabilirsiniz.": "Unit account created successfully. You can sign in now.",
+        "Opti-Shift | Kayıt": "Opti-Shift | Sign Up",
+        "Planlama paneline erişmeye hazır mısınız? Yeni ünite hesabınızı oluşturun.": "Ready to access the planning console? Create your unit account.",
+        "Kayıt formunu doldurarak yeni bir ünite hesabı oluşturabilirsiniz.": "Fill out the form to create a new unit account.",
+        "Örn: Kartal Dermatoloji": "e.g., Kartal Dermatoloji",
+        "örn: kartal_derma": "e.g., kartal_derma",
+        "Zaten bir hesabınız var mı?": "Already have an account?",
         "Opti-Shift | Personel": "Opti-Shift | Staff",
         "Ekip Yönetimi": "Team Management",
         "Personel Paneli": "Staff Panel",
@@ -514,6 +535,75 @@ def login():
 def logout():
     session.clear()
     return redirect(url_for("login"))
+
+
+@app.route("/register", methods=["GET", "POST"])
+def register():
+    if "unit_id" in session:
+        return redirect(url_for("planla"))
+
+    error = None
+    success = None
+    defaults = {"unit_name": "", "username": ""}
+
+    if request.method == "POST":
+        unit_name = (request.form.get("unit_name") or "").strip()
+        username = (request.form.get("username") or "").strip().lower()
+        password = request.form.get("password") or ""
+        confirm_password = request.form.get("confirm_password") or ""
+
+        defaults["unit_name"] = unit_name
+        defaults["username"] = (request.form.get("username") or "").strip()
+
+        if not unit_name:
+            error = _("Lütfen ünite adı girin.")
+        elif not username:
+            error = _("Lütfen kullanıcı adı girin.")
+        elif not password:
+            error = _("Lütfen şifre girin.")
+        elif len(password) < 8:
+            error = _("Şifre en az 8 karakter olmalıdır.")
+        elif password != confirm_password:
+            error = _("Şifreler eşleşmiyor.")
+        else:
+            existing_unit = next(
+                (
+                    unit
+                    for unit in list_units()
+                    if (unit.get("name") or "").strip().lower() == unit_name.lower()
+                ),
+                None,
+            )
+            if existing_unit:
+                error = _("Bu ünite adı zaten kullanımda.")
+            elif get_account_by_username(username):
+                error = _("Bu kullanıcı adı zaten kullanımda.")
+            else:
+                try:
+                    unit_id = create_unit(unit_name)
+                except Exception:
+                    existing_unit = next(
+                        (
+                            unit
+                            for unit in list_units()
+                            if (unit.get("name") or "").strip().lower() == unit_name.lower()
+                        ),
+                        None,
+                    )
+                    unit_id = int(existing_unit["id"]) if existing_unit else None
+                if unit_id is None:
+                    error = _("Ünite oluşturulamadı.")
+                else:
+                    password_hash = generate_password_hash(password)
+                    try:
+                        create_unit_account(username, password_hash, unit_id)
+                    except Exception:
+                        error = _("Kullanıcı hesabı oluşturulamadı.")
+                    else:
+                        success = _("Ünite hesabı başarıyla oluşturuldu. Giriş yapabilirsiniz.")
+                        defaults = {"unit_name": "", "username": ""}
+
+    return render_template("register.html", error=error, success=success, defaults=defaults)
 
 
 @app.route("/set-language/<lang>")

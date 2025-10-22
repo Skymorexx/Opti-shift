@@ -1,0 +1,88 @@
+﻿{% extends "layout.html" %}
+
+{% block title %}{{ t('Opti-Shift | Kayıt') }}{% endblock %}
+
+{% block page_header %}
+  <div class="opt-page-header">
+    <div>
+      <span class="opt-page-eyebrow">{{ t('Kayıt Ol') }}</span>
+      <h1 class="opt-page-title">{{ t('Yeni Ünite Hesabı') }}</h1>
+      <p class="opt-page-subtitle">
+        {{ t('Planlama paneline erişmeye hazır mısınız? Yeni ünite hesabınızı oluşturun.') }}
+      </p>
+    </div>
+  </div>
+{% endblock %}
+
+{% block content %}
+  <section class="opt-surface-card">
+    <header class="opt-toolbar">
+      <h2 class="opt-toolbar-title">{{ t('Kayıt Ol') }}</h2>
+    </header>
+    <p class="opt-plan-note mb-3">{{ t('Kayıt formunu doldurarak yeni bir ünite hesabı oluşturabilirsiniz.') }}</p>
+
+    {% if error %}
+      <div class="alert alert-danger opt-alert" role="alert">{{ error }}</div>
+    {% endif %}
+    {% if success %}
+      <div class="alert alert-success opt-alert" role="alert">{{ success }}</div>
+    {% endif %}
+
+    <form method="post" action="{{ url_for('register') }}" class="opt-form-grid opt-form-grid--cols-2">
+      <div class="opt-form-grid__full">
+        <label class="form-label" for="unit_name">{{ t('Ünite Adı') }}</label>
+        <input
+          type="text"
+          id="unit_name"
+          name="unit_name"
+          class="form-control"
+          required
+          placeholder="{{ t('Örn: Kartal Dermatoloji') }}"
+          value="{{ defaults.unit_name }}"
+        >
+      </div>
+      <div>
+        <label class="form-label" for="username">{{ t('Kullanıcı Adı') }}</label>
+        <input
+          type="text"
+          id="username"
+          name="username"
+          class="form-control"
+          required
+          placeholder="{{ t('örn: kartal_derma') }}"
+          value="{{ defaults.username }}"
+        >
+      </div>
+      <div>
+        <label class="form-label" for="password">{{ t('Şifre') }}</label>
+        <input
+          type="password"
+          id="password"
+          name="password"
+          class="form-control"
+          required
+          autocomplete="new-password"
+        >
+      </div>
+      <div>
+        <label class="form-label" for="confirm_password">{{ t('Şifre Tekrar') }}</label>
+        <input
+          type="password"
+          id="confirm_password"
+          name="confirm_password"
+          class="form-control"
+          required
+          autocomplete="new-password"
+        >
+      </div>
+      <div class="opt-form-grid__full">
+        <button type="submit" class="btn btn-primary btn-lg">{{ t('Kayıt Ol') }}</button>
+      </div>
+    </form>
+
+    <div class="text-center mt-3">
+      <span class="opt-meta">{{ t('Zaten bir hesabınız var mı?') }}</span>
+      <a href="{{ url_for('login') }}" class="ms-2">{{ t('Giriş Yap') }}</a>
+    </div>
+  </section>
+{% endblock %}

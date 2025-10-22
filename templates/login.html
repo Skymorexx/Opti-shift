@@ -50,6 +50,11 @@
         <button type="submit" class="btn btn-primary btn-lg w-100 mt-2">{{ t('Giriş Yap') }}</button>
       </form>
 
+      <div class="text-center mt-3">
+        <span class="opt-meta">{{ t('Hesabınız yok mu?') }}</span>
+        <a href="{{ url_for('register') }}" class="ms-2">{{ t('Kayıt Ol') }}</a>
+      </div>
+
       <p class="opt-meta text-center mt-4 mb-0">
         {{ t('İlk giriş bilgilerinizi sistem yöneticiniz paylaşır. Sorun yaşarsanız destek ekibi ile iletişime geçin.') }}
       </p>
