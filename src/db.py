@@ -1,14 +1,27 @@
-"""SQLite helper utilities for Opt-shft prototype."""
+"""Database helper utilities for Opti-shift prototype."""
 
 from __future__ import annotations
 
+import os
 import sqlite3
 from pathlib import Path
 from typing import Any, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from werkzeug.security import generate_password_hash
 
+try:
+    import psycopg2
+    from psycopg2.extras import RealDictCursor
+except Exception:  # pragma: no cover - optional dependency for sqlite-only usage
+    psycopg2 = None  # type: ignore
+    RealDictCursor = None  # type: ignore
+
 DB_PATH = Path("opt-shift.db")
+DATABASE_URL = os.getenv("DATABASE_URL")
+if DATABASE_URL and DATABASE_URL.startswith('postgres://'):
+    DATABASE_URL = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
+IS_POSTGRES = bool(DATABASE_URL and DATABASE_URL.startswith(("postgres://", "postgresql://")))
+
 DEFAULT_ROTATION_PERIOD = "daily"
 VALID_ROTATION_PERIODS = {
     "daily",
@@ -20,6 +33,201 @@ VALID_ROTATION_PERIODS = {
 DEFAULT_UNIT_NAME = "Varsayilan Unitesi"
 DEFAULT_ADMIN_USERNAME = "admin"
 DEFAULT_ADMIN_PASSWORD = "admin123"
+
+
+class PostgresCursor:
+    def __init__(self, connection: "psycopg2.extensions.connection", cursor: "psycopg2.extensions.cursor"):
+        self._conn = connection
+        self._cursor = cursor
+
+    def __getattr__(self, item):  # pragma: no cover - passthrough
+        return getattr(self._cursor, item)
+
+    @property
+    def lastrowid(self) -> Optional[int]:
+        with self._conn.cursor() as cur:
+            cur.execute("SELECT LASTVAL()")
+            value = cur.fetchone()
+            return int(value[0]) if value else None
+
+
+class PostgresConnection:
+    """Lightweight wrapper mimicking sqlite3 connection behaviour for psycopg2 connections."""
+
+    def __init__(self, conn: "psycopg2.extensions.connection"):
+        self._conn = conn
+
+    def __enter__(self) -> "PostgresConnection":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        if exc_type:
+            self._conn.rollback()
+        else:
+            self._conn.commit()
+        self._conn.close()
+
+    @staticmethod
+    def _convert_query(query: str) -> str:
+        return query.replace("?", "%s")
+
+    def execute(self, query: str, params: Sequence[Any] | Mapping[str, Any] = ()) -> PostgresCursor:
+        sql = self._convert_query(query)
+        cur = self._conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute(sql, params)
+        return PostgresCursor(self._conn, cur)
+
+    def executemany(self, query: str, seq_of_params: Iterable[Sequence[Any]]) -> PostgresCursor:
+        sql = self._convert_query(query)
+        cur = self._conn.cursor(cursor_factory=RealDictCursor)
+        cur.executemany(sql, seq_of_params)
+        return PostgresCursor(self._conn, cur)
+
+    def commit(self) -> None:
+        self._conn.commit()
+
+    def rollback(self) -> None:
+        self._conn.rollback()
+
+    def cursor(self):
+        return self._conn.cursor(cursor_factory=RealDictCursor)
+
+    def close(self) -> None:
+        self._conn.close()
+
+
+def _init_postgres_schema() -> None:
+    if not IS_POSTGRES:
+        return
+    if psycopg2 is None:
+        raise RuntimeError("psycopg is required for PostgreSQL usage.")
+
+    ddl_statements = [
+        """
+        CREATE TABLE IF NOT EXISTS units (
+            id SERIAL PRIMARY KEY,
+            name TEXT UNIQUE NOT NULL
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS unit_accounts (
+            id SERIAL PRIMARY KEY,
+            username TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            unit_id INTEGER NOT NULL REFERENCES units(id) ON DELETE CASCADE
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS staff (
+            id SERIAL PRIMARY KEY,
+            name TEXT NOT NULL,
+            title TEXT NOT NULL,
+            seniority TEXT,
+            min_night_duties_per_month INTEGER,
+            max_night_duties_per_month INTEGER,
+            unit_id INTEGER NOT NULL REFERENCES units(id) ON DELETE CASCADE
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS clinics (
+            id SERIAL PRIMARY KEY,
+            name TEXT UNIQUE NOT NULL,
+            display_order INTEGER,
+            required_assistants INTEGER DEFAULT 1,
+            rotation_period TEXT DEFAULT 'daily',
+            sorumlu_uzman_id INTEGER,
+            unit_id INTEGER NOT NULL REFERENCES units(id) ON DELETE CASCADE
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS duty_types (
+            id SERIAL PRIMARY KEY,
+            name TEXT UNIQUE NOT NULL,
+            duration_hours INTEGER NOT NULL CHECK (duration_hours > 0),
+            duty_category TEXT,
+            required_staff_count INTEGER DEFAULT 1,
+            unit_id INTEGER NOT NULL REFERENCES units(id) ON DELETE CASCADE
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS clinic_seniority_rules (
+            id SERIAL PRIMARY KEY,
+            clinic_id INTEGER NOT NULL REFERENCES clinics(id) ON DELETE CASCADE,
+            required_seniority TEXT NOT NULL,
+            required_count INTEGER NOT NULL CHECK (required_count >= 0),
+            unit_id INTEGER NOT NULL REFERENCES units(id) ON DELETE CASCADE,
+            UNIQUE (clinic_id, required_seniority)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS assignment_history (
+            id SERIAL PRIMARY KEY,
+            staff_id INTEGER NOT NULL REFERENCES staff(id),
+            clinic_id INTEGER REFERENCES clinics(id),
+            assignment_date DATE NOT NULL,
+            plan_month_year TEXT NOT NULL,
+            day_type TEXT,
+            unit_id INTEGER NOT NULL REFERENCES units(id) ON DELETE CASCADE
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS leave_requests (
+            id SERIAL PRIMARY KEY,
+            staff_id INTEGER NOT NULL REFERENCES staff(id) ON DELETE CASCADE,
+            start_date DATE NOT NULL,
+            end_date DATE NOT NULL,
+            reason TEXT,
+            unit_id INTEGER NOT NULL REFERENCES units(id) ON DELETE CASCADE
+        )
+        """,
+    ]
+
+    index_statements = [
+        "CREATE INDEX IF NOT EXISTS idx_unit_accounts_unit_id ON unit_accounts(unit_id)",
+        "CREATE INDEX IF NOT EXISTS idx_staff_unit_id ON staff(unit_id)",
+        "CREATE INDEX IF NOT EXISTS idx_clinics_unit_id ON clinics(unit_id)",
+        "CREATE INDEX IF NOT EXISTS idx_duty_types_unit_id ON duty_types(unit_id)",
+        "CREATE INDEX IF NOT EXISTS idx_clinic_rules_unit_id ON clinic_seniority_rules(unit_id)",
+        "CREATE INDEX IF NOT EXISTS idx_assignment_history_unit_id ON assignment_history(unit_id)",
+        "CREATE INDEX IF NOT EXISTS idx_leave_requests_unit_id ON leave_requests(unit_id)",
+    ]
+
+    with psycopg2.connect(DATABASE_URL) as raw_conn:  # type: ignore[arg-type]
+        with raw_conn.cursor() as cur:
+            for statement in ddl_statements:
+                cur.execute(statement)
+            for statement in index_statements:
+                cur.execute(statement)
+        raw_conn.commit()
+
+    @staticmethod
+    def _convert_query(query: str) -> str:
+        # Psycopg expects %s style placeholders
+        return query.replace("?", "%s")
+
+    def execute(self, query: str, params: Sequence[Any] | Mapping[str, Any] = ()) -> PostgresCursor:
+        sql = self._convert_query(query)
+        cur = self._conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute(sql, params)
+        return PostgresCursor(self._conn, cur)
+
+    def executemany(self, query: str, seq_of_params: Iterable[Sequence[Any]]) -> PostgresCursor:
+        sql = self._convert_query(query)
+        cur = self._conn.cursor(cursor_factory=RealDictCursor)
+        cur.executemany(sql, seq_of_params)
+        return PostgresCursor(self._conn, cur)
+
+    def commit(self) -> None:
+        self._conn.commit()
+
+    def rollback(self) -> None:
+        self._conn.rollback()
+
+    def cursor(self) -> "psycopg.Cursor[Any]":
+        return self._conn.cursor()
+
+    def close(self) -> None:
+        self._conn.close()
 
 
 def _ensure_units_table(conn: sqlite3.Connection) -> None:
@@ -115,8 +323,14 @@ def _normalize_rotation_period(value: Optional[str]) -> str:
     return DEFAULT_ROTATION_PERIOD
 
 
-def get_connection() -> sqlite3.Connection:
-    """Create a new sqlite3 connection with sensible defaults."""
+def get_connection():
+    """Create a database connection with sensible defaults."""
+    if IS_POSTGRES:
+        if psycopg2 is None or RealDictCursor is None:
+            raise RuntimeError("psycopg is required for PostgreSQL usage.")
+        conn = psycopg2.connect(DATABASE_URL)
+        return PostgresConnection(conn)
+
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
@@ -125,6 +339,13 @@ def get_connection() -> sqlite3.Connection:
 
 def init_db() -> None:
     """Ensure required tables exist."""
+    if IS_POSTGRES:
+        _init_postgres_schema()
+        with get_connection() as conn:
+            default_unit_id = _ensure_default_unit(conn)
+            _ensure_default_admin(conn, default_unit_id)
+        return
+
     with get_connection() as conn:
         _ensure_units_table(conn)
         _ensure_unit_accounts_table(conn)
@@ -957,4 +1178,3 @@ def add_duty_type(
         )
         conn.commit()
         return cursor.lastrowid
-
