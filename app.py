@@ -2,9 +2,11 @@
 
 import calendar
 import io
+import os
 import sqlite3
 from collections import defaultdict
 from datetime import date, datetime, timedelta
+from functools import wraps
 from typing import Dict, List, Optional, Set, Tuple
 
 try:
@@ -14,7 +16,8 @@ except ModuleNotFoundError:
     pd = None  # type: ignore
     PANDAS_AVAILABLE = False
 
-from flask import Flask, redirect, render_template, request, send_file, url_for
+from flask import abort, g, Flask, redirect, render_template, request, send_file, session, url_for
+from werkzeug.security import check_password_hash
 
 from src.db import (
     DEFAULT_ROTATION_PERIOD,
@@ -27,8 +30,10 @@ from src.db import (
     delete_clinic_seniority_rule,
     delete_staff,
     delete_leave_request,
+    get_account_by_username,
     init_db,
     get_staff_by_id,
+    get_unit_by_id,
     list_assignment_history,
     list_clinic_seniority_rules,
     list_clinics,
@@ -44,6 +49,7 @@ from src.solver_prototype import people_from_records, slots_from_records, solve_
 
 
 app = Flask(__name__)
+app.secret_key = os.environ.get("OPTISHIFT_SECRET_KEY", "dev-secret")
 init_db()
 
 MONTH_OPTIONS = [
@@ -82,6 +88,66 @@ SENIORITY_CHOICES = [
     ("comez", "Comez"),
 ]
 SENIORITY_LABELS = {value: label for value, label in SENIORITY_CHOICES}
+
+
+def _safe_redirect_target(target: Optional[str]) -> Optional[str]:
+    if target and target.startswith("/") and not target.startswith("//"):
+        return target
+    return None
+
+
+def _current_unit() -> Optional[Dict[str, str]]:
+    return getattr(g, "current_unit", None)
+
+
+def _require_unit_id() -> int:
+    unit = _current_unit()
+    if not unit:
+        abort(401)
+    return int(unit["id"])
+
+
+@app.before_request
+def load_current_account() -> None:
+    unit_id = session.get("unit_id")
+    username = session.get("username")
+    g.current_user = None
+    g.current_unit = None
+    if unit_id is None:
+        return
+    unit_row = get_unit_by_id(unit_id)
+    if unit_row is None:
+        session.clear()
+        return
+    g.current_user = {"username": username or "", "unit_id": int(unit_row["id"])}
+    g.current_unit = {"id": int(unit_row["id"]), "name": unit_row["name"]}
+
+
+@app.context_processor
+def inject_template_context():
+    unit = _current_unit()
+    user = getattr(g, "current_user", None)
+    unit_name = unit["name"] if unit else None
+    username = user["username"] if user else None
+    return {
+        "current_username": username,
+        "current_clinic_name": unit_name,
+        "current_unit_name": unit_name,
+    }
+
+
+def login_required(view):
+    @wraps(view)
+    def wrapped_view(*args, **kwargs):
+        if "unit_id" not in session:
+            next_candidate = request.full_path if request.query_string else request.path
+            next_hint = _safe_redirect_target(next_candidate.rstrip("?"))
+            if next_hint:
+                return redirect(url_for("login", next=next_hint))
+            return redirect(url_for("login"))
+        return view(*args, **kwargs)
+
+    return wrapped_view
 
 
 def _safe_int(value):
@@ -123,12 +189,44 @@ def _classify_day_type(day_value: date) -> str:
 
 @app.route("/")
 def index():
+    if "unit_id" not in session:
+        return redirect(url_for("login"))
     return redirect(url_for("planla"))
 
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if "unit_id" in session:
+        return redirect(url_for("planla"))
+    error = None
+    next_url = _safe_redirect_target(request.args.get("next"))
+    if request.method == "POST":
+        username = (request.form.get("username") or "").strip().lower()
+        password = request.form.get("password") or ""
+        posted_next = _safe_redirect_target(request.form.get("next"))
+        if posted_next:
+            next_url = posted_next
+        if not username or not password:
+            error = "Kullanici adi ve sifre gerekli."
+        else:
+            account = get_account_by_username(username)
+            if not account or not check_password_hash(account["password_hash"], password):
+                error = "Gecersiz giris bilgileri."
+            else:
+                session.clear()
+                session["account_id"] = int(account["id"])
+                session["username"] = account["username"]
+                session["unit_id"] = int(account["unit_id"])
+                return redirect(next_url or url_for("planla"))
+    return render_template("login.html", error=error, next_url=next_url)
 
 
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect(url_for("login"))
 
-def compute_plan(year=None, month=None, plan_type: str = "clinic", *, clinics=None, duty_types=None):
+
+def compute_plan(unit_id: int, year=None, month=None, plan_type: str = "clinic", *, clinics=None, duty_types=None):
     fallback_notes: List[str] = []
     today = date.today()
     selected_year = _safe_int(year) or today.year
@@ -138,7 +236,7 @@ def compute_plan(year=None, month=None, plan_type: str = "clinic", *, clinics=No
     if normalized_plan not in {"clinic", "nobet"}:
         normalized_plan = "clinic"
 
-    staff_rows_raw = list(list_staff())
+    staff_rows_raw = list(list_staff(unit_id))
     if not staff_rows_raw:
         error = "Lutfen once personel ekleyin. /personel sayfasindan kayit olusturabilirsiniz."
         return None, error, 400
@@ -146,7 +244,7 @@ def compute_plan(year=None, month=None, plan_type: str = "clinic", *, clinics=No
     staff_records = [dict(row) for row in staff_rows_raw]
     staff_name_map = {row["id"]: row.get("name") for row in staff_records}
 
-    clinic_rows_source = clinics if clinics is not None else list(list_clinics())
+    clinic_rows_source = clinics if clinics is not None else list(list_clinics(unit_id))
     valid_rotation_values = {option[0] for option in CLINIC_ROTATION_OPTIONS}
     clinic_records = []
     for row in clinic_rows_source:
@@ -171,7 +269,7 @@ def compute_plan(year=None, month=None, plan_type: str = "clinic", *, clinics=No
             continue
         clinic_rotation_periods[clinic_id_int] = clinic.get("rotation_period", DEFAULT_ROTATION_PERIOD)
 
-    clinic_rule_rows = [dict(row) for row in list(list_clinic_seniority_rules())]
+    clinic_rule_rows = [dict(row) for row in list(list_clinic_seniority_rules(unit_id))]
     clinic_rule_map: Dict[int, Dict[str, int]] = defaultdict(dict)
     for rule in clinic_rule_rows:
         clinic_id_raw = rule.get("clinic_id")
@@ -191,7 +289,7 @@ def compute_plan(year=None, month=None, plan_type: str = "clinic", *, clinics=No
     if normalized_plan != "nobet":
         previous_year, previous_month = _previous_month(selected_year, selected_month)
         previous_period = _plan_period(previous_year, previous_month)
-        history_rows = [dict(row) for row in list(list_assignment_history(previous_period))]
+        history_rows = [dict(row) for row in list(list_assignment_history(unit_id, previous_period))]
         for history in history_rows:
             clinic_id_raw = history.get("clinic_id")
             staff_id_raw = history.get("staff_id")
@@ -215,7 +313,7 @@ def compute_plan(year=None, month=None, plan_type: str = "clinic", *, clinics=No
             if history_year < 1:
                 break
             period = _plan_period(history_year, history_month)
-            for history in list_assignment_history(period):
+            for history in list_assignment_history(unit_id, period):
                 day_type = (history.get("day_type") or "").strip().lower()
                 if day_type != "weekend":
                     continue
@@ -228,7 +326,7 @@ def compute_plan(year=None, month=None, plan_type: str = "clinic", *, clinics=No
 
     weekend_history_counts = dict(weekend_history_counts)
 
-    leave_rows = [dict(row) for row in list(list_leave_requests())]
+    leave_rows = [dict(row) for row in list(list_leave_requests(unit_id))]
     leave_requests_map: Dict[int, List[tuple[date, date]]] = defaultdict(list)
     for leave in leave_rows:
         staff_id_raw = leave.get("staff_id")
@@ -247,7 +345,7 @@ def compute_plan(year=None, month=None, plan_type: str = "clinic", *, clinics=No
             start_dt, end_dt = end_dt, start_dt
         leave_requests_map[staff_id_int].append((start_dt, end_dt))
 
-    duty_rows_source = duty_types if duty_types is not None else list(list_duty_types())
+    duty_rows_source = duty_types if duty_types is not None else list(list_duty_types(unit_id))
     duty_type_records = [dict(row) for row in duty_rows_source]
 
     people = people_from_records(staff_records)
@@ -843,7 +941,9 @@ def build_plan_table(assignments, clinics, duty_types, year, month, plan_type: s
 
 
 @app.route("/planla", methods=["GET"])
+@login_required
 def planla():
+    unit_id = _require_unit_id()
     today = date.today()
     requested_year = request.args.get("year", type=int)
     requested_month = request.args.get("month", type=int)
@@ -855,11 +955,11 @@ def planla():
     requested_plan_type = (request.args.get("plan_type") or "clinic").strip().lower()
     selected_plan_type = requested_plan_type if requested_plan_type in {option[0] for option in PLAN_TYPE_OPTIONS} else "clinic"
 
-    staff_rows_for_plan = [dict(row) for row in list(list_staff())]
+    staff_rows_for_plan = [dict(row) for row in list(list_staff(unit_id))]
     staff_name_map_for_plan = {row["id"]: row.get("name") for row in staff_rows_for_plan}
 
     clinic_records = []
-    for row in list(list_clinics()):
+    for row in list(list_clinics(unit_id)):
         row_dict = dict(row)
         responsible_id = row_dict.get("sorumlu_uzman_id")
         row_dict["responsible_name"] = (
@@ -867,9 +967,10 @@ def planla():
         )
         clinic_records.append(row_dict)
 
-    duty_type_records = [dict(row) for row in list(list_duty_types())]
+    duty_type_records = [dict(row) for row in list(list_duty_types(unit_id))]
 
     result, error_message, error_status = compute_plan(
+        unit_id=unit_id,
         year=selected_year,
         month=selected_month,
         plan_type=selected_plan_type,
@@ -921,7 +1022,9 @@ def planla():
 
 
 @app.route("/planla/approve", methods=["POST"])
+@login_required
 def planla_approve():
+    unit_id = _require_unit_id()
     year_raw = request.form.get("year")
     month_raw = request.form.get("month")
     plan_type_raw = (request.form.get("plan_type") or "clinic").strip().lower()
@@ -939,9 +1042,10 @@ def planla_approve():
             )
         )
 
-    clinic_records = [dict(row) for row in list(list_clinics())]
-    duty_type_records = [dict(row) for row in list(list_duty_types())]
+    clinic_records = [dict(row) for row in list(list_clinics(unit_id))]
+    duty_type_records = [dict(row) for row in list(list_duty_types(unit_id))]
     result, error_message, _error_status = compute_plan(
+        unit_id=unit_id,
         year=year,
         month=month,
         plan_type=plan_type_raw,
@@ -993,7 +1097,7 @@ def planla_approve():
         new_entries.append((staff_id, clinic_id, assignment_date_obj.isoformat(), day_type))
 
     plan_period = _plan_period(year, month)
-    existing_rows = list(list_assignment_history(plan_period))
+    existing_rows = list(list_assignment_history(unit_id, plan_period))
     preserved_entries: List[Tuple[int, Optional[int], str, str]] = []
     for record in existing_rows:
         staff_id = _safe_int(record.get("staff_id"))
@@ -1016,7 +1120,7 @@ def planla_approve():
 
     combined_entries = preserved_entries + new_entries
     if combined_entries or store_clinic or store_night:
-        replace_assignment_history(plan_period, combined_entries)
+        replace_assignment_history(unit_id, plan_period, combined_entries)
 
     return redirect(
         url_for(
@@ -1030,7 +1134,9 @@ def planla_approve():
 
 
 @app.route("/download-plan", methods=["GET"])
+@login_required
 def download_plan():
+    unit_id = _require_unit_id()
     if not PANDAS_AVAILABLE:
         body = (
             "Excel cikti icin pandas ve openpyxl kutuphaneleri gerekli.\n"
@@ -1046,11 +1152,11 @@ def download_plan():
     requested_plan_type = (request.args.get("plan_type") or "clinic").strip().lower()
     selected_plan_type = requested_plan_type if requested_plan_type in {option[0] for option in PLAN_TYPE_OPTIONS} else "clinic"
 
-    staff_rows_for_download = [dict(row) for row in list(list_staff())]
+    staff_rows_for_download = [dict(row) for row in list(list_staff(unit_id))]
     staff_name_map_for_download = {row["id"]: row.get("name") for row in staff_rows_for_download}
 
     clinic_records = []
-    for row in list(list_clinics()):
+    for row in list(list_clinics(unit_id)):
         row_dict = dict(row)
         responsible_id = row_dict.get("sorumlu_uzman_id")
         row_dict["responsible_name"] = (
@@ -1058,8 +1164,9 @@ def download_plan():
         )
         clinic_records.append(row_dict)
 
-    duty_type_records = [dict(row) for row in list(list_duty_types())]
+    duty_type_records = [dict(row) for row in list(list_duty_types(unit_id))]
     result, error_message, error_status = compute_plan(
+        unit_id=unit_id,
         year=selected_year,
         month=selected_month,
         plan_type=selected_plan_type,
@@ -1106,6 +1213,7 @@ def download_plan():
     )
 
 @app.route("/personel", methods=["GET", "POST"])
+@login_required
 def personel():
     error = None
     title_options = ["Uzm. Dr.", "Asst. Dr."]
@@ -1116,6 +1224,7 @@ def personel():
     ]
     night_limit_options = list(range(0, 11))
     allowed_seniority_values = {value for value, _label in seniority_options}
+    unit_id = _require_unit_id()
 
     if request.method == "POST":
         action = (request.form.get("action") or "add").strip().lower()
@@ -1124,14 +1233,14 @@ def personel():
             if not staff_id:
                 error = "Gecerli bir personel secin."
             else:
-                delete_staff(staff_id)
+                delete_staff(staff_id, unit_id)
                 return redirect(url_for("personel"))
         elif action == "update":
             staff_id = _safe_int(request.form.get("staff_id"))
             if not staff_id:
                 error = "Gecerli bir personel secin."
             else:
-                staff_row = get_staff_by_id(staff_id)
+                staff_row = get_staff_by_id(staff_id, unit_id)
                 if not staff_row:
                     error = "Personel kaydi bulunamadi."
                 elif (staff_row["title"] or "").strip() != "Asst. Dr.":
@@ -1161,6 +1270,7 @@ def personel():
                             seniority=seniority_raw,
                             min_night=min_night_value,
                             max_night=max_night_value,
+                            unit_id=unit_id,
                         )
                         return redirect(url_for("personel"))
         elif action == "add":
@@ -1207,12 +1317,13 @@ def personel():
                     seniority=seniority_value,
                     min_night=min_night_value if title == "Asst. Dr." else None,
                     max_night=max_night_value if title == "Asst. Dr." else None,
+                    unit_id=unit_id,
                 )
                 return redirect(url_for("personel"))
         else:
             error = "Bilinmeyen islem tipi."
 
-    staff_records = list(list_staff())
+    staff_records = list(list_staff(unit_id))
     return render_template(
         "personel.html",
         staff=staff_records,
@@ -1226,9 +1337,11 @@ def personel():
 
 @app.route("/izinler", methods=["GET", "POST"])
 @app.route("/nler", methods=["GET", "POST"])
+@login_required
 def nler():
     error = None
-    staff_rows = [dict(row) for row in list(list_staff())]
+    unit_id = _require_unit_id()
+    staff_rows = [dict(row) for row in list(list_staff(unit_id))]
     staff_map = {row["id"]: row.get("name") for row in staff_rows}
     form_defaults = {
         "staff_id": "",
@@ -1244,7 +1357,7 @@ def nler():
             if not leave_id:
                 error = "Gecerli bir izin kaydi secin."
             else:
-                delete_leave_request(leave_id)
+                delete_leave_request(leave_id, unit_id)
                 return redirect(url_for("nler"))
         elif action == "add":
             staff_id = _safe_int(request.form.get("staff_id"))
@@ -1280,12 +1393,13 @@ def nler():
                             start_date=start_dt.isoformat(),
                             end_date=end_dt.isoformat(),
                             reason=reason,
+                            unit_id=unit_id,
                         )
                         return redirect(url_for("nler"))
         else:
             error = "Bilinmeyen islem tipi."
 
-    leave_rows = [dict(row) for row in list(list_leave_requests())]
+    leave_rows = [dict(row) for row in list(list_leave_requests(unit_id))]
     leave_entries = []
     for leave in leave_rows:
         staff_id = leave.get("staff_id")
@@ -1311,9 +1425,11 @@ def nler():
 
 
 @app.route("/klinikler", methods=["GET", "POST"])
+@login_required
 def klinikler():
     error = None
-    staff_rows = [dict(row) for row in list(list_staff())]
+    unit_id = _require_unit_id()
+    staff_rows = [dict(row) for row in list(list_staff(unit_id))]
     specialists = [
         row
         for row in staff_rows
@@ -1343,6 +1459,7 @@ def klinikler():
                         required_assistants=required_value,
                         sorumlu_uzman_id=responsible_id,
                         rotation_period=rotation_period,
+                        unit_id=unit_id,
                     )
                     return redirect(url_for("klinikler"))
                 except sqlite3.IntegrityError:
@@ -1353,7 +1470,7 @@ def klinikler():
                 error = "Gecerli bir klinik secin."
             else:
                 offset = -1 if action == "move_up" else 1
-                moved = reorder_clinic(clinic_id, offset)
+                moved = reorder_clinic(clinic_id, offset, unit_id=unit_id)
                 if moved:
                     return redirect(url_for("klinikler"))
                 error = "Siralama guncellenemedi."
@@ -1376,6 +1493,7 @@ def klinikler():
                     required_value,
                     responsible_id,
                     rotation_period=rotation_period,
+                    unit_id=unit_id,
                 )
                 return redirect(url_for("klinikler"))
         elif action == "add_rule":
@@ -1391,7 +1509,7 @@ def klinikler():
                 error = "Kural adedi 1 veya daha buyuk olmalidir."
             else:
                 try:
-                    add_clinic_seniority_rule(clinic_id, seniority_choice, count_value)
+                    add_clinic_seniority_rule(clinic_id, seniority_choice, count_value, unit_id=unit_id)
                 except ValueError as exc:
                     error = str(exc)
                 else:
@@ -1401,21 +1519,21 @@ def klinikler():
             if not rule_id:
                 error = "Gecerli bir kural secin."
             else:
-                delete_clinic_seniority_rule(rule_id)
+                delete_clinic_seniority_rule(rule_id, unit_id)
                 return redirect(url_for("klinikler"))
         elif action == "delete":
             clinic_id = _safe_int(request.form.get("clinic_id"))
             if not clinic_id:
                 error = "Gecerli bir klinik secin."
             else:
-                delete_clinic(clinic_id)
+                delete_clinic(clinic_id, unit_id)
                 return redirect(url_for("klinikler"))
         else:
             error = "Bilinmeyen islem tipi."
 
     staff_name_map = {row["id"]: row.get("name") for row in staff_rows}
     rules_lookup = defaultdict(list)
-    for rule_row in list(list_clinic_seniority_rules()):
+    for rule_row in list(list_clinic_seniority_rules(unit_id)):
         rule_dict = dict(rule_row)
         clinic_id = rule_dict.get("clinic_id")
         if clinic_id is None:
@@ -1426,7 +1544,7 @@ def klinikler():
         rules_lookup[clinic_id].append(rule_dict)
 
     clinic_records = []
-    for row in list(list_clinics()):
+    for row in list(list_clinics(unit_id)):
         row_dict = dict(row)
         clinic_id = row_dict.get("id")
         rotation_period = (row_dict.get("rotation_period") or DEFAULT_ROTATION_PERIOD).strip().lower()
@@ -1456,8 +1574,10 @@ def klinikler():
 
 
 @app.route("/nobetler", methods=["GET", "POST"])
+@login_required
 def nobetler():
     error = None
+    unit_id = _require_unit_id()
     if request.method == "POST":
         action = (request.form.get("action") or "add").strip().lower()
         if action == "add":
@@ -1495,12 +1615,13 @@ def nobetler():
                         duration_hours=duration,
                         duty_category=category,
                         required_staff_count=required_staff,
+                        unit_id=unit_id,
                     )
                     return redirect(url_for("nobetler"))
                 except sqlite3.IntegrityError:
                     error = "Bu isimde bir nobet turu zaten mevcut."
 
-    duty_types = list(list_duty_types())
+    duty_types = list(list_duty_types(unit_id))
     return render_template("nobetler.html", duty_types=duty_types, error=error)
 
 

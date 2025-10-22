@@ -1,94 +1,86 @@
-<!doctype html>
-<html lang="tr">
-  <head>
-    <meta charset="utf-8">
-    <title>Opt-shft | Izinler</title>
-    <style>
-      body { font-family: Arial, sans-serif; margin: 2rem; background: #f7f7f9; color: #222; }
-      h1 { margin-bottom: 1.5rem; }
-      .panel { background: #fff; padding: 1.5rem; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.08); margin-bottom: 2rem; }
-      table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
-      th, td { padding: 0.6rem 0.8rem; border-bottom: 1px solid #ddd; text-align: left; vertical-align: middle; }
-      th { background: #f0f0f3; }
-      .alert { background: #ffe0e0; border: 1px solid #ff9494; padding: 0.75rem; border-radius: 6px; margin-bottom: 1rem; color: #b00020; }
-      nav a { margin-right: 1rem; text-decoration: none; color: #007bff; }
-      nav a:hover { text-decoration: underline; }
-      .empty-state { color: #555; font-style: italic; }
-      form label { display: block; font-weight: bold; margin-bottom: 0.25rem; }
-      form input, form select, form textarea { width: 100%; padding: 0.6rem; margin-bottom: 1rem; border: 1px solid #ccc; border-radius: 6px; }
-      form textarea { min-height: 80px; resize: vertical; }
-      form input[type="date"] { max-width: 220px; }
-      button { background: #007bff; color: white; padding: 0.6rem 1.2rem; border: none; border-radius: 6px; cursor: pointer; }
-      button:hover { background: #005fcc; }
-      .actions { display: flex; gap: 0.4rem; align-items: center; }
-      .actions form { margin: 0; }
-      .actions button.delete { background: #dc3545; padding: 0.45rem 0.9rem; }
-      .actions button.delete:hover { background: #b02a37; }
-      .form-footer { display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; }
-      .hint { font-size: 0.85rem; color: #666; margin: 0; }
-      .disabled-note { font-size: 0.9rem; color: #a00; margin-top: -0.5rem; }
-    </style>
-  </head>
-  <body>
-    <h1>Personel Izinleri</h1>
-    <nav>
-      <a href="{{ url_for('personel') }}">Personel</a>
-      <a href="{{ url_for('klinikler') }}">Klinikler</a>
-      <a href="{{ url_for('nler') }}">Izinler</a>
-      <a href="{{ url_for('nobetler') }}">Nobet Turleri</a>
-      <a href="{{ url_for('planla') }}">Planlama</a>
-    </nav>
+{% extends "layout.html" %}
 
-    <section class="panel">
-      <h2>Kayitli Izinler</h2>
-      {% if error %}
-        <div class="alert">{{ error }}</div>
-      {% endif %}
-      {% if leaves %}
-        <table>
+{% block title %}Opti-shift | Izinler{% endblock %}
+
+{% block page_header %}
+  <div class="opt-page-header">
+    <div>
+      <span class="opt-page-eyebrow">Planlama Dengelemesi</span>
+      <h1 class="opt-page-title">Izin Kayitlari</h1>
+      <p class="opt-page-subtitle">
+        Personelin izinlerini takip ederek planlama motorunun guncel verilerle calismasini saglayin.
+      </p>
+    </div>
+    <div class="opt-page-actions">
+      <span class="opt-page-meta">Aktif izin kaydi: {{ leaves|length }}</span>
+    </div>
+  </div>
+{% endblock %}
+
+{% block content %}
+  <section class="opt-surface-card">
+    <header class="opt-toolbar">
+      <h2 class="opt-toolbar-title">Kayitli Izinler</h2>
+    </header>
+    {% if error %}
+      <div class="alert alert-danger opt-alert mb-3" role="alert">{{ error }}</div>
+    {% endif %}
+    {% if leaves %}
+      <div class="opt-table-wrapper">
+        <table class="table table-hover align-middle">
           <thead>
             <tr>
-              <th>#</th>
-              <th>Personel</th>
-              <th>Baslangic</th>
-              <th>Bitis</th>
-              <th>Sebep</th>
-              <th>Islem</th>
+              <th scope="col">#</th>
+              <th scope="col">Personel</th>
+              <th scope="col">Baslangic</th>
+              <th scope="col">Bitis</th>
+              <th scope="col">Sebep</th>
+              <th scope="col">Islem</th>
             </tr>
           </thead>
           <tbody>
             {% for leave in leaves %}
               <tr>
                 <td>{{ leave["id"] }}</td>
-                <td>{{ leave["staff_name"] }}</td>
+                <td>
+                  <strong>{{ leave["staff_name"] }}</strong>
+                </td>
                 <td>{{ leave["start_date"] }}</td>
                 <td>{{ leave["end_date"] }}</td>
                 <td>{{ leave["reason"] or '-' }}</td>
-                <td class="actions">
+                <td>
                   <form method="post" action="{{ url_for('nler') }}">
                     <input type="hidden" name="action" value="delete">
                     <input type="hidden" name="leave_id" value="{{ leave['id'] }}">
-                    <button type="submit" class="delete">Sil</button>
+                    <button type="submit" class="btn btn-outline-danger btn-sm">Sil</button>
                   </form>
                 </td>
               </tr>
             {% endfor %}
           </tbody>
         </table>
-      {% else %}
-        <p class="empty-state">Henuz izin girisi yapilmamis.</p>
-      {% endif %}
-    </section>
+      </div>
+    {% else %}
+      <div class="opt-empty-state">
+        <p>Henuz izin kaydi bulunmuyor.</p>
+      </div>
+    {% endif %}
+  </section>
 
-    <section class="panel">
-      <h2>Yeni Izin Ekle</h2>
-      {% if not staff %}
-        <p class="disabled-note">Once personel ekleyin. Personel olmadan izin tanimi yapilamaz.</p>
-      {% endif %}
-      <form method="post" action="{{ url_for('nler') }}">
-        <input type="hidden" name="action" value="add">
-        <label for="staff_id">Personel</label>
-        <select id="staff_id" name="staff_id" {% if not staff %}disabled{% endif %}>
+  <section class="opt-surface-card">
+    <header class="opt-toolbar">
+      <h2 class="opt-toolbar-title">Yeni Izin Ekle</h2>
+    </header>
+    {% if not staff %}
+      <div class="opt-status-banner opt-status-banner--error mb-3">
+        Once personel ekleyin. Personel olmadan izin olusturulamaz.
+      </div>
+    {% endif %}
+    <form method="post" action="{{ url_for('nler') }}" class="opt-form-grid opt-form-grid--cols-2">
+      <input type="hidden" name="action" value="add">
+      <div>
+        <label class="form-label" for="staff_id">Personel</label>
+        <select id="staff_id" name="staff_id" class="form-select" {% if not staff %}disabled{% endif %}>
           <option value="">Personel secin</option>
           {% for member in staff %}
             <option value="{{ member['id'] }}" {% if form_defaults.staff_id == member['id'] | string %}selected{% endif %}>
@@ -96,21 +88,45 @@
             </option>
           {% endfor %}
         </select>
-
-        <label for="start_date">Baslangic Tarihi</label>
-        <input type="date" id="start_date" name="start_date" value="{{ form_defaults.start_date }}" {% if not staff %}disabled{% endif %}>
-
-        <label for="end_date">Bitis Tarihi</label>
-        <input type="date" id="end_date" name="end_date" value="{{ form_defaults.end_date }}" {% if not staff %}disabled{% endif %}>
-
-        <label for="reason">Sebep (opsiyonel)</label>
-        <textarea id="reason" name="reason" placeholder="Orn: Düğün, Kongre" {% if not staff %}disabled{% endif %}>{{ form_defaults.reason }}</textarea>
-
-        <div class="form-footer">
-          <button type="submit" {% if not staff %}disabled{% endif %}>Izin Ekle</button>
-          <p class="hint">Not: Bitis tarihi dahil olacak sekilde planlamada personel bu gunlerde gorevlendirilmeyecek.</p>
+      </div>
+      <div>
+        <label class="form-label" for="start_date">Baslangic Tarihi</label>
+        <input
+          type="date"
+          id="start_date"
+          name="start_date"
+          class="form-control"
+          value="{{ form_defaults.start_date }}"
+          {% if not staff %}disabled{% endif %}
+        >
+      </div>
+      <div>
+        <label class="form-label" for="end_date">Bitis Tarihi</label>
+        <input
+          type="date"
+          id="end_date"
+          name="end_date"
+          class="form-control"
+          value="{{ form_defaults.end_date }}"
+          {% if not staff %}disabled{% endif %}
+        >
+      </div>
+      <div>
+        <label class="form-label" for="reason">Sebep (opsiyonel)</label>
+        <textarea
+          id="reason"
+          name="reason"
+          class="form-control"
+          placeholder="Orn: kongre, tatil"
+          rows="3"
+          {% if not staff %}disabled{% endif %}>{{ form_defaults.reason }}</textarea>
+      </div>
+      <div class="opt-form-grid__full">
+        <div class="opt-floating-actions">
+          <button type="submit" class="btn btn-success btn-lg" {% if not staff %}disabled{% endif %}>Izin Kaydet</button>
+          <p class="opt-plan-note mb-0">Bitis tarihi dahil edilerek personel bu gunlerde planlamaya alinmaz.</p>
         </div>
-      </form>
-    </section>
-  </body>
-</html>
+      </div>
+    </form>
+  </section>
+{% endblock %}

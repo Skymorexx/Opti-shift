@@ -1,0 +1,58 @@
+{% extends "layout.html" %}
+
+{% block title %}Opt-shft | Giriş{% endblock %}
+
+{% block navbar %}{% endblock %}
+
+{% block content %}
+  <div class="opt-login-wrapper">
+    <div class="opt-surface-card opt-login-card">
+      <div class="text-center mb-4">
+        <h1 class="h4 fw-bold mb-2">Opt-shft Yönetim Girişi</h1>
+        <p class="opt-meta">Planlama paneline erişmek için sistem yöneticinizden aldığınız bilgileri kullanın.</p>
+      </div>
+
+      {% if error %}
+        <div class="alert alert-danger opt-alert" role="alert">
+          {{ error }}
+        </div>
+      {% endif %}
+
+      <form method="post" action="{{ url_for('login') }}" class="opt-form-grid">
+        {% if next_url %}
+          <input type="hidden" name="next" value="{{ next_url }}">
+        {% endif %}
+        <div>
+          <label class="form-label" for="username">Kullanıcı Adı</label>
+          <input
+            type="text"
+            id="username"
+            name="username"
+            class="form-control form-control-lg"
+            placeholder="ornek@klinik.com"
+            autocomplete="username"
+            required
+            autofocus
+          >
+        </div>
+        <div>
+          <label class="form-label" for="password">Şifre</label>
+          <input
+            type="password"
+            id="password"
+            name="password"
+            class="form-control form-control-lg"
+            placeholder="Şifreniz"
+            autocomplete="current-password"
+            required
+          >
+        </div>
+        <button type="submit" class="btn btn-primary btn-lg w-100 mt-2">Giriş Yap</button>
+      </form>
+
+      <p class="opt-meta text-center mt-4 mb-0">
+        İlk giriş bilgilerinizi sistem yöneticiniz paylaşır. Sorun yaşarsanız destek ekibi ile iletişime geçin.
+      </p>
+    </div>
+  </div>
+{% endblock %}
