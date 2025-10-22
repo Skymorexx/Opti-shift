@@ -1753,40 +1753,6 @@ def izinler_legacy():
     return redirect(url_for("izinler"))
 
 
-@app.route("/setup-account")
-def setup_account():
-    unit_name = "FSM Dahiliye"
-    username = "fsm_dahiliye"
-    password = "fsmdahiliye123"
-
-    init_db()
-
-    units = list_units()
-    unit_id = None
-    for unit in units:
-        if unit.get("name") == unit_name:
-            unit_id = int(unit.get("id"))
-            break
-
-    if unit_id is None:
-        try:
-            unit_id = create_unit(unit_name)
-        except Exception:
-            units = list_units()
-            for unit in units:
-                if unit.get("name") == unit_name:
-                    unit_id = int(unit.get("id"))
-                    break
-    if unit_id is None:
-        return "Ünite oluşturulamadı.", 500
-
-    account = get_account_by_username(username)
-    if account is None:
-        password_hash = generate_password_hash(password)
-        create_unit_account(username, password_hash, unit_id)
-
-    return "Ünite hesabı başarıyla oluşturuldu."
-
 @app.route("/klinikler", methods=["GET", "POST"])
 @login_required
 def klinikler():
