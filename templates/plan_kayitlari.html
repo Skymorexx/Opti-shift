@@ -1,0 +1,175 @@
+{% extends "layout.html" %}
+
+{% block title %}{{ t('Plan Kayıtları') }}{% endblock %}
+
+{% block page_header %}
+  <div class="opt-page-header">
+    <div>
+      <span class="opt-page-eyebrow">{{ t('Arşiv') }}</span>
+      <h1 class="opt-page-title">{{ t('Plan Kayıtları') }}</h1>
+      <p class="opt-page-subtitle">
+        {{ t('Kaydedilen planları inceleyin, gerekirse silin veya yeniden oluşturun.') }}
+      </p>
+    </div>
+  </div>
+{% endblock %}
+
+{% block content %}
+  <section class="opt-surface-card">
+    <header class="opt-toolbar">
+      <h2 class="opt-toolbar-title">{{ t('Filtreler') }}</h2>
+    </header>
+    <form method="get" action="{{ url_for('plan_kayitlari') }}" class="row g-3">
+      <div class="col-md-4">
+        <label for="plan-type-filter" class="form-label">{{ t('Plan Türü') }}</label>
+        <select id="plan-type-filter" name="plan_type" class="form-select">
+          {% for option in filter_options %}
+            <option value="{{ option.value }}" {% if option.value == selected_filter %}selected{% endif %}>
+              {{ option.label }}
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-4 align-self-end">
+        <button type="submit" class="btn btn-primary">{{ t('Filtrele') }}</button>
+      </div>
+    </form>
+  </section>
+
+  {% if status_message %}
+    <div class="alert alert-success opt-alert" role="alert">{{ status_message }}</div>
+  {% endif %}
+  {% if status_error %}
+    <div class="alert alert-danger opt-alert" role="alert">{{ status_error }}</div>
+  {% endif %}
+
+  {% if records %}
+    {% for record in records %}
+      <section class="opt-surface-card mb-4">
+        <header class="opt-toolbar d-flex justify-content-between flex-wrap gap-3">
+          <div>
+            <h2 class="opt-toolbar-title mb-0">{{ record.period_label }}</h2>
+            <small class="text-muted">{{ t('Plan dönemi: {period}', period=record.period) }}</small>
+          </div>
+          <div class="d-flex align-items-center gap-3">
+            {% if record.clinic_count %}
+              <span class="opt-pill">{{ t('Klinik: {count}', count=record.clinic_count) }}</span>
+            {% endif %}
+            {% if record.night_count %}
+              <span class="opt-pill opt-pill--info">{{ t('Nöbet: {count}', count=record.night_count) }}</span>
+            {% endif %}
+            <form method="post" action="{{ url_for('plan_kayitlari') }}" class="d-inline">
+              <input type="hidden" name="action" value="delete">
+              <input type="hidden" name="plan_period" value="{{ record.period }}">
+              <input type="hidden" name="plan_type" value="all">
+              <input type="hidden" name="filter_plan_type" value="{{ selected_filter }}">
+              <button type="submit" class="btn btn-outline-danger btn-sm" onclick="return confirm('{{ t('Bu döneme ait tüm kayıtları silmek istediğinize emin misiniz?') }}');">
+                {{ t('Planı tamamen sil') }}
+              </button>
+            </form>
+          </div>
+        </header>
+        <div class="accordion" id="plan-record-{{ loop.index }}">
+          {% if record.has_clinic %}
+            <div class="accordion-item">
+              <h2 class="accordion-header" id="clinic-heading-{{ loop.index }}">
+                <button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#clinic-body-{{ loop.index }}" aria-expanded="true" aria-controls="clinic-body-{{ loop.index }}">
+                  {{ t('Klinik Atamaları') }} ({{ record.clinic_count }})
+                </button>
+              </h2>
+              <div id="clinic-body-{{ loop.index }}" class="accordion-collapse collapse show" aria-labelledby="clinic-heading-{{ loop.index }}">
+                <div class="accordion-body">
+                  <div class="opt-table-wrapper mb-3">
+                    <table class="table table-hover align-middle mb-0">
+                      <thead>
+                        <tr>
+                          <th scope="col">{{ t('Tarih') }}</th>
+                          <th scope="col">{{ t('Personel') }}</th>
+                          <th scope="col">{{ t('Klinik') }}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {% for entry in record.clinic_entries %}
+                          <tr>
+                            <td>{{ entry.assignment_date }}</td>
+                            <td>{{ entry.staff_name }}</td>
+                            <td>{{ entry.clinic_name }}</td>
+                          </tr>
+                        {% endfor %}
+                      </tbody>
+                    </table>
+                  </div>
+                  <form method="post" action="{{ url_for('plan_kayitlari') }}" class="d-inline">
+                    <input type="hidden" name="action" value="delete">
+                    <input type="hidden" name="plan_period" value="{{ record.period }}">
+                    <input type="hidden" name="plan_type" value="clinic">
+                    <input type="hidden" name="filter_plan_type" value="{{ selected_filter }}">
+                    <button type="submit" class="btn btn-outline-warning btn-sm" onclick="return confirm('{{ t('Klinik planını silmek istediğinize emin misiniz?') }}');">
+                      {{ t('Klinik planını sil') }}
+                    </button>
+                  </form>
+                </div>
+              </div>
+            </div>
+          {% endif %}
+          {% if record.has_night %}
+            <div class="accordion-item">
+              <h2 class="accordion-header" id="night-heading-{{ loop.index }}">
+                <button class="accordion-button {% if record.has_clinic %}collapsed{% endif %}" type="button" data-bs-toggle="collapse" data-bs-target="#night-body-{{ loop.index }}" aria-expanded="{% if record.has_clinic %}false{% else %}true{% endif %}" aria-controls="night-body-{{ loop.index }}">
+                  {{ t('Nöbet Atamaları') }} ({{ record.night_count }})
+                </button>
+              </h2>
+              <div id="night-body-{{ loop.index }}" class="accordion-collapse collapse{% if not record.has_clinic %} show{% endif %}" aria-labelledby="night-heading-{{ loop.index }}">
+                <div class="accordion-body">
+                  <div class="opt-table-wrapper mb-3">
+                    <table class="table table-hover align-middle mb-0">
+                      <thead>
+                        <tr>
+                          <th scope="col">{{ t('Tarih') }}</th>
+                          <th scope="col">{{ t('Personel') }}</th>
+                          <th scope="col">{{ t('Gün Tipi') }}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {% for entry in record.night_entries %}
+                          <tr>
+                            <td>{{ entry.assignment_date }}</td>
+                            <td>{{ entry.staff_name }}</td>
+                            <td>
+                              {% if entry.day_type == 'weekend' %}
+                                {{ t('Hafta Sonu') }}
+                              {% else %}
+                                {{ t('Hafta İçi') }}
+                              {% endif %}
+                            </td>
+                          </tr>
+                        {% endfor %}
+                      </tbody>
+                    </table>
+                  </div>
+                  <form method="post" action="{{ url_for('plan_kayitlari') }}" class="d-inline">
+                    <input type="hidden" name="action" value="delete">
+                    <input type="hidden" name="plan_period" value="{{ record.period }}">
+                    <input type="hidden" name="plan_type" value="nobet">
+                    <input type="hidden" name="filter_plan_type" value="{{ selected_filter }}">
+                    <button type="submit" class="btn btn-outline-warning btn-sm" onclick="return confirm('{{ t('Nöbet planını silmek istediğinize emin misiniz?') }}');">
+                      {{ t('Nöbet planını sil') }}
+                    </button>
+                  </form>
+                </div>
+              </div>
+            </div>
+          {% endif %}
+        </div>
+      </section>
+    {% endfor %}
+  {% else %}
+    <section class="opt-surface-card">
+      <div class="opt-empty-state">
+        <h3>{{ t('Henüz kayıtlı plan bulunmuyor.') }}</h3>
+        <p>{{ t('Planı onayladığınızda geçmişe kaydedilir ve burada listelenir.') }}</p>
+        <a href="{{ url_for('planla') }}" class="btn btn-primary btn-sm">{{ t('Yeni plan oluştur') }}</a>
+      </div>
+    </section>
+  {% endif %}
+{% endblock %}

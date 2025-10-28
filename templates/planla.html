@@ -168,19 +168,28 @@
     </section>
   {% endif %}
 
-  {% if result and selected_plan_type == 'clinic' %}
+  {% if result %}
     <section class="opt-surface-card">
       <header class="opt-toolbar">
         <h2 class="opt-toolbar-title">{{ t('Planı Onayla') }}</h2>
+        <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('plan_duzenle', year=selected_year, month=selected_month, plan_type=selected_plan_type) }}">
+          {{ t('Planı Düzenle') }}
+        </a>
       </header>
       <p class="opt-plan-note mb-3">
-        {{ t('Onaylanan planın atamaları {period} dönemi için saklanır ve gelecek ayın adalet hesabında kullanılır.', period=plan_period) }}
+        {{ t('Onaylanan {plan_label} planının atamaları {period} dönemi için saklanır ve gelecek dönem adalet hesabında kullanılır.', plan_label=t(selected_plan_type_label), period=plan_period) }}
       </p>
       <form method="post" action="{{ url_for('planla_approve') }}" class="opt-floating-actions">
         <input type="hidden" name="year" value="{{ selected_year }}">
         <input type="hidden" name="month" value="{{ selected_month }}">
         <input type="hidden" name="plan_type" value="{{ selected_plan_type }}">
-        <button type="submit" class="btn btn-success btn-lg">{{ t('Planı Onayla ve Kaydet') }}</button>
+        <button type="submit" class="btn btn-success btn-lg">
+          {% if selected_plan_type == 'nobet' %}
+            {{ t('Nöbet Planını Onayla ve Kaydet') }}
+          {% else %}
+            {{ t('Planı Onayla ve Kaydet') }}
+          {% endif %}
+        </button>
       </form>
     </section>
   {% endif %}

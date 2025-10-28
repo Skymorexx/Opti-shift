@@ -1,0 +1,82 @@
+{% extends "layout.html" %}
+
+{% block title %}{{ t('Planı Düzenle') }}{% endblock %}
+
+{% block page_header %}
+  <div class="opt-page-header">
+    <div>
+      <span class="opt-page-eyebrow">{{ t('Plan Düzenleme') }}</span>
+      <h1 class="opt-page-title">{{ t('Planı Düzenle') }}</h1>
+      <p class="opt-page-subtitle">
+        {{ t('Plan türü: {hint}', hint=plan_hint) }} · {{ period_label }}
+      </p>
+    </div>
+    <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('planla', year=year, month=month, plan_type=plan_type) }}">
+      {{ t('Plan sayfasına geri dön') }}
+    </a>
+  </div>
+{% endblock %}
+
+{% block content %}
+  {% if form_message %}
+    <div class="alert alert-success opt-alert" role="alert">{{ form_message }}</div>
+  {% endif %}
+  {% if form_error %}
+    <div class="alert alert-danger opt-alert" role="alert">{{ form_error }}</div>
+  {% endif %}
+
+  <form method="post" action="{{ url_for('plan_duzenle') }}" class="opt-surface-card">
+    <input type="hidden" name="year" value="{{ year }}">
+    <input type="hidden" name="month" value="{{ month }}">
+    <input type="hidden" name="plan_type" value="{{ plan_type }}">
+    <header class="opt-toolbar">
+      <h2 class="opt-toolbar-title">{{ t('Atamaları Güncelle') }}</h2>
+      {% if plan_type == 'nobet' %}
+        <span class="opt-pill opt-pill--info">{{ t('Yalnızca nöbet tutabilir asistanlar seçilebilir.') }}</span>
+      {% endif %}
+    </header>
+    <div class="opt-table-wrapper">
+      <table class="table table-striped align-middle mb-0">
+        <thead>
+          <tr>
+            <th scope="col">{{ t('Tarih') }}</th>
+            <th scope="col">{{ t('Görev') }}</th>
+            {% if plan_type == 'clinic' %}
+              <th scope="col">{{ t('Klinik') }}</th>
+            {% endif %}
+            <th scope="col">{{ t('Atanan Personel') }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for assignment in editable_assignments %}
+            <tr>
+              <td>{{ assignment.assignment_date }}</td>
+              <td>{{ assignment.label }}</td>
+              {% if plan_type == 'clinic' %}
+                <td>{{ assignment.clinic_name or '-' }}</td>
+              {% endif %}
+              <td>
+                <input type="hidden" name="slot_id[]" value="{{ assignment.slot_id }}">
+                <select name="staff_id[]" class="form-select" required>
+                  {% for option in assignment.options %}
+                    <option value="{{ option.id }}" {% if option.id == assignment.current_staff_id %}selected{% endif %}>
+                      {{ option.name }} {% if option.title %}({{ option.title }}){% endif %}
+                    </option>
+                  {% endfor %}
+                </select>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="opt-floating-actions mt-4">
+      <button type="submit" name="submit_action" value="preview" class="btn btn-outline-primary">
+        {{ t('Değişiklikleri Uygula') }}
+      </button>
+      <button type="submit" name="submit_action" value="save" class="btn btn-success">
+        {{ t('Kaydet ve Onayla') }}
+      </button>
+    </div>
+  </form>
+{% endblock %}

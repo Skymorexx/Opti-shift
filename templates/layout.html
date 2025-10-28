@@ -31,6 +31,9 @@
                 <a class="nav-link {% if endpoint in ['planla', 'planla_approve'] %}active{% endif %}" href="{{ url_for('planla') }}">{{ t('Planlama') }}</a>
               </li>
               <li class="nav-item">
+                <a class="nav-link {% if endpoint == 'plan_kayitlari' %}active{% endif %}" href="{{ url_for('plan_kayitlari') }}">{{ t('Plan Kayıtları') }}</a>
+              </li>
+              <li class="nav-item">
                 <a class="nav-link {% if endpoint == 'personel' %}active{% endif %}" href="{{ url_for('personel') }}">{{ t('Personel') }}</a>
               </li>
               <li class="nav-item">

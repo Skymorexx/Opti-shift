@@ -7,7 +7,7 @@ import sqlite3
 from collections import defaultdict
 from datetime import date, datetime, timedelta
 from functools import wraps
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple
 
 try:
     import pandas as pd
@@ -132,6 +132,57 @@ TRANSLATIONS = {
         "{month} {year}": "{month} {year}",
         "İcap Nöbeti Dağılımı": "On-call Duty Distribution",
         "Gece Nöbeti Dağılımı": "Night Duty Distribution",
+        "Onaylanan {plan_label} planının atamaları {period} dönemi için saklanır ve gelecek dönem adalet hesabında kullanılır.": "Approved {plan_label} assignments are stored for {period} and used in next period’s fairness balancing.",
+        "Nöbet Planını Onayla ve Kaydet": "Approve and Save Duty Plan",
+        "Plan Kayıtları": "Plan Records",
+        "Arşiv": "Archive",
+        "Kaydedilen planları inceleyin, gerekirse silin veya yeniden oluşturun.": "Review saved plans, delete them, or regenerate new ones.",
+        "Filtreler": "Filters",
+        "Plan Türü": "Plan Type",
+        "Filtrele": "Filter",
+        "Plan dönemi: {period}": "Plan period: {period}",
+        "Klinik: {count}": "Clinic: {count}",
+        "Nöbet: {count}": "Duty: {count}",
+        "Planı tamamen sil": "Delete entire plan",
+        "Bu döneme ait tüm kayıtları silmek istediğinize emin misiniz?": "Are you sure you want to delete all records for this period?",
+        "Klinik Atamaları": "Clinic Assignments",
+        "Klinik planını sil": "Delete clinic plan",
+        "Klinik planını silmek istediğinize emin misiniz?": "Are you sure you want to delete the clinic plan?",
+        "Nöbet Atamaları": "Duty Assignments",
+        "Nöbet planını sil": "Delete duty plan",
+        "Nöbet planını silmek istediğinize emin misiniz?": "Are you sure you want to delete the duty plan?",
+        "Tarih": "Date",
+        "Personel": "Staff",
+        "Klinik": "Clinic",
+        "Gün Tipi": "Day Type",
+        "Hafta Sonu": "Weekend",
+        "Hafta İçi": "Weekday",
+        "Henüz kayıtlı plan bulunmuyor.": "No saved plans yet.",
+        "Planı onayladığınızda geçmişe kaydedilir ve burada listelenir.": "Once you approve a plan it is archived and shown here.",
+        "Yeni plan oluştur": "Create new plan",
+        "Tümü": "All",
+        "Klinik planları": "Clinic plans",
+        "Nöbet planları": "Duty plans",
+        "Klinik plan kaydı silindi.": "Clinic plan record deleted.",
+        "Nöbet plan kaydı silindi.": "Duty plan record deleted.",
+        "Plan kaydı silindi.": "Plan record deleted.",
+        "Geçersiz plan türü.": "Invalid plan type.",
+        "Planı Düzenle": "Edit Plan",
+        "Plan Düzenleme": "Plan Editing",
+        "Plan türü: {hint}": "Plan type: {hint}",
+        "Plan sayfasına geri dön": "Back to planning",
+        "Atamaları Güncelle": "Update Assignments",
+        "Yalnızca nöbet tutabilir asistanlar seçilebilir.": "Only eligible residents can be assigned to duty slots.",
+        "Görev": "Duty",
+        "Atanan Personel": "Assigned Staff",
+        "Değişiklikleri Uygula": "Apply Changes",
+        "Kaydet ve Onayla": "Save and Approve",
+        "Eksik atama bilgisi gönderildi.": "Incomplete assignment data submitted.",
+        "Geçerli bir personel seçin.": "Select a valid staff member.",
+        "Nöbet planı yalnızca nöbet tutabilir asistanlara atanabilir.": "Duty plans can only be assigned to eligible residents.",
+        "Değişiklikler uygulandı, kaydetmek için onaylayın.": "Changes applied. Save to confirm.",
+        "Klinik planı": "Clinic plan",
+        "Nöbet planı": "Duty plan",
         "Eğitim Yılı": "Training Year",
         "Eğitim yılı seçin": "Select training year",
         "Eğitim yılı yok": "No training year",
@@ -1696,6 +1747,393 @@ def planla():
     )
 
 
+@app.route("/plan-kayitlari", methods=["GET", "POST"])
+@login_required
+def plan_kayitlari():
+    unit_id = _require_unit_id()
+    filter_raw = (request.args.get("plan_type") or "all").strip().lower()
+    allowed_filters = {"all", "clinic", "nobet"}
+    selected_filter = filter_raw if filter_raw in allowed_filters else "all"
+
+    status_message = request.args.get("status_message")
+    status_error = request.args.get("status_error")
+
+    if request.method == "POST":
+        action = (request.form.get("action") or "").strip().lower()
+        target_period = (request.form.get("plan_period") or "").strip()
+        target_type = (request.form.get("plan_type") or "").strip().lower()
+        current_filter = (request.form.get("filter_plan_type") or selected_filter).strip().lower()
+        if current_filter not in allowed_filters:
+            current_filter = "all"
+        message_param = None
+        error_param = None
+        if action == "delete" and target_period:
+            existing_rows = [dict(row) for row in list(list_assignment_history(unit_id, target_period))]
+            preserved: List[Tuple[int, Optional[int], str, Optional[str]]] = []
+            if target_type == "clinic":
+                for row in existing_rows:
+                    if row.get("clinic_id") is None:
+                        continue
+                    preserved.append(
+                        (
+                            int(row.get("staff_id")),
+                            row.get("clinic_id"),
+                            row.get("assignment_date"),
+                            (row.get("day_type") or "weekday"),
+                        )
+                    )
+                replace_assignment_history(unit_id, target_period, preserved)
+                message_param = _("Klinik plan kaydı silindi.")
+            elif target_type == "nobet":
+                for row in existing_rows:
+                    if row.get("clinic_id") is not None:
+                        continue
+                    preserved.append(
+                        (
+                            int(row.get("staff_id")),
+                            row.get("clinic_id"),
+                            row.get("assignment_date"),
+                            (row.get("day_type") or "weekday"),
+                        )
+                    )
+                replace_assignment_history(unit_id, target_period, preserved)
+                message_param = _("Nöbet plan kaydı silindi.")
+            elif target_type == "all":
+                replace_assignment_history(unit_id, target_period, [])
+                message_param = _("Plan kaydı silindi.")
+            else:
+                error_param = _("Geçersiz plan türü.")
+        return redirect(
+            url_for(
+                "plan_kayitlari",
+                plan_type=current_filter,
+                status_message=message_param,
+                status_error=error_param,
+            )
+        )
+
+    staff_rows = [dict(row) for row in list(list_staff(unit_id))]
+    clinic_rows = [dict(row) for row in list(list_clinics(unit_id))]
+    staff_map = {row["id"]: row.get("name") for row in staff_rows}
+    clinic_map = {row["id"]: row.get("name") for row in clinic_rows}
+
+    history_rows = [dict(row) for row in list(list_assignment_history(unit_id))]
+
+    month_label_map = {value: label for value, label in MONTH_OPTIONS}
+
+    def format_period_label(period_value: str) -> str:
+        try:
+            year_part, month_part = period_value.split("-", 1)
+            month_int = int(month_part)
+            month_label = month_label_map.get(month_int, month_part)
+            return f"{_(month_label)} {year_part}"
+        except Exception:
+            return period_value
+
+    period_map: Dict[str, Dict[str, Any]] = {}
+    for row in history_rows:
+        period_key = (row.get("plan_month_year") or "").strip()
+        if not period_key:
+            continue
+        record = period_map.setdefault(
+            period_key,
+            {
+                "period": period_key,
+                "period_label": format_period_label(period_key),
+                "clinic_entries": [],
+                "night_entries": [],
+            },
+        )
+        clinic_id = row.get("clinic_id")
+        entry = {
+            "staff_id": row.get("staff_id"),
+            "staff_name": staff_map.get(row.get("staff_id"), f"ID {row.get('staff_id')}"),
+            "clinic_id": clinic_id,
+            "clinic_name": clinic_map.get(clinic_id) if clinic_id is not None else None,
+            "assignment_date": row.get("assignment_date"),
+            "day_type": (row.get("day_type") or "weekday").lower(),
+        }
+        if clinic_id is None:
+            record["night_entries"].append(entry)
+        else:
+            record["clinic_entries"].append(entry)
+
+    def sort_period_key(period: str) -> Tuple[int, int]:
+        try:
+            year_part, month_part = period.split("-", 1)
+            return int(year_part), int(month_part)
+        except Exception:
+            return (0, 0)
+
+    records: List[Dict[str, Any]] = []
+    for period_value, record in period_map.items():
+        has_clinic = len(record["clinic_entries"]) > 0
+        has_night = len(record["night_entries"]) > 0
+        if selected_filter == "clinic" and not has_clinic:
+            continue
+        if selected_filter == "nobet" and not has_night:
+            continue
+        record["has_clinic"] = has_clinic
+        record["has_night"] = has_night
+        record["clinic_count"] = len(record["clinic_entries"])
+        record["night_count"] = len(record["night_entries"])
+        records.append(record)
+
+    records.sort(key=lambda item: sort_period_key(item["period"]), reverse=True)
+
+    filter_options = [
+        {"value": "all", "label": _("Tümü")},
+        {"value": "clinic", "label": _("Klinik planları")},
+        {"value": "nobet", "label": _("Nöbet planları")},
+    ]
+
+    return render_template(
+        "plan_kayitlari.html",
+        records=records,
+        selected_filter=selected_filter,
+        filter_options=filter_options,
+        status_message=status_message,
+        status_error=status_error,
+    )
+
+
+def _store_plan_assignments(
+    unit_id: int,
+    plan_type: str,
+    assignments: Sequence[Mapping[str, Any]],
+    year: int,
+    month: int,
+) -> int:
+    normalized_type = (plan_type or "clinic").strip().lower()
+    if normalized_type not in {"clinic", "nobet"}:
+        raise ValueError("Unknown plan type")
+    store_clinic = normalized_type == "clinic"
+    store_night = normalized_type == "nobet"
+
+    new_entries: List[Tuple[int, Optional[int], str, str]] = []
+    for assignment in assignments or []:
+        slot_id = assignment.get("slot_id") or ""
+        if store_clinic:
+            if not slot_id.startswith("clinic_"):
+                continue
+            clinic_id = _extract_clinic_id(slot_id)
+            if clinic_id is None:
+                continue
+        else:
+            if not slot_id.startswith("duty_"):
+                continue
+            clinic_id = None
+        person_identifier = assignment.get("person_id") or ""
+        if not isinstance(person_identifier, str) or not person_identifier.startswith("staff_"):
+            continue
+        staff_id = _safe_int(person_identifier.split("_", 1)[1])
+        if staff_id is None:
+            continue
+        start_iso = assignment.get("start")
+        try:
+            assignment_date_obj = datetime.fromisoformat(start_iso).date()
+        except (TypeError, ValueError):
+            continue
+        day_type = _classify_day_type(assignment_date_obj)
+        new_entries.append((staff_id, clinic_id, assignment_date_obj.isoformat(), day_type))
+
+    plan_period = _plan_period(year, month)
+    existing_rows = [dict(row) for row in list(list_assignment_history(unit_id, plan_period))]
+    preserved_entries: List[Tuple[int, Optional[int], str, str]] = []
+    for record in existing_rows:
+        staff_id_existing = _safe_int(record.get("staff_id"))
+        assignment_date = record.get("assignment_date")
+        if staff_id_existing is None or not assignment_date:
+            continue
+        clinic_id_existing = record.get("clinic_id")
+        day_type_existing = (record.get("day_type") or "weekday").strip().lower()
+        if day_type_existing not in {"weekday", "weekend"}:
+            day_type_existing = "weekday"
+        entry_tuple = (staff_id_existing, clinic_id_existing, assignment_date, day_type_existing)
+        if store_clinic:
+            if clinic_id_existing is None:
+                preserved_entries.append(entry_tuple)
+        elif store_night:
+            if clinic_id_existing is not None:
+                preserved_entries.append(entry_tuple)
+
+    combined_entries = preserved_entries + new_entries
+    replace_assignment_history(unit_id, plan_period, combined_entries)
+    return len(new_entries)
+
+
+@app.route("/plan-duzenle", methods=["GET", "POST"])
+@login_required
+def plan_duzenle():
+    unit_id = _require_unit_id()
+    if request.method == "POST":
+        year = _safe_int(request.form.get("year"))
+        month = _safe_int(request.form.get("month"))
+        plan_type_raw = (request.form.get("plan_type") or "clinic").strip().lower()
+        submit_action = (request.form.get("submit_action") or "preview").strip().lower()
+    else:
+        year = request.args.get("year", type=int)
+        month = request.args.get("month", type=int)
+        plan_type_raw = (request.args.get("plan_type") or "clinic").strip().lower()
+        submit_action = "preview"
+
+    allowed_plan_types = {value for value, _label in PLAN_TYPE_OPTIONS}
+    plan_type = plan_type_raw if plan_type_raw in allowed_plan_types else "clinic"
+
+    if year is None or month is None:
+        return redirect(
+            url_for(
+                "planla",
+                approval_error=_("Geçerli bir yıl ve ay seçin."),
+                plan_type=plan_type,
+            )
+        )
+
+    staff_records = [dict(row) for row in list(list_staff(unit_id))]
+    staff_map = {row["id"]: row for row in staff_records}
+    clinic_records = [dict(row) for row in list(list_clinics(unit_id))]
+    clinic_map = {row["id"]: row.get("name") for row in clinic_records}
+
+    result, error_message, error_status = compute_plan(
+        unit_id=unit_id,
+        year=year,
+        month=month,
+        plan_type=plan_type,
+        clinics=clinic_records,
+        duty_types=[dict(row) for row in list(list_duty_types(unit_id))],
+    )
+    if error_message or not result:
+        return redirect(
+            url_for(
+                "planla",
+                year=year,
+                month=month,
+                plan_type=plan_type,
+                approval_error=error_message or _("Plan oluşturulamadı."),
+            )
+        )
+
+    current_assignments: List[Dict[str, Any]] = [dict(item) for item in result.get("assignments") or []]
+    assignment_lookup = {item["slot_id"]: item for item in current_assignments}
+
+    form_message = None
+    form_error = None
+
+    if request.method == "POST":
+        slot_ids = request.form.getlist("slot_id[]")
+        staff_ids = request.form.getlist("staff_id[]")
+        if len(slot_ids) != len(staff_ids):
+            form_error = _("Eksik atama bilgisi gönderildi.")
+        else:
+            modified_assignments: List[Dict[str, Any]] = []
+            validation_error = None
+            for slot_id, staff_value in zip(slot_ids, staff_ids):
+                base_assignment = assignment_lookup.get(slot_id)
+                if base_assignment is None:
+                    continue
+                staff_int = _safe_int(staff_value)
+                if staff_int is None or staff_int not in staff_map:
+                    validation_error = _("Geçerli bir personel seçin.")
+                    break
+                staff_row = staff_map[staff_int]
+                if plan_type == "nobet":
+                    title_value = (staff_row.get("title") or "").strip().lower()
+                    night_flag = int(staff_row.get("night_duty_exempt") or 0)
+                    if not title_value.startswith("asst") or night_flag:
+                        validation_error = _("Nöbet planı yalnızca nöbet tutabilir asistanlara atanabilir.")
+                        break
+                updated_assignment = dict(base_assignment)
+                updated_assignment["person_id"] = f"staff_{staff_int}"
+                updated_assignment["person_name"] = staff_row.get("name")
+                updated_assignment["person_title"] = staff_row.get("title")
+                seniority_value = (staff_row.get("seniority") or "").strip().lower()
+                if (staff_row.get("title") or "").strip() == "Uzm. Dr.":
+                    seniority_value = "uzman"
+                updated_assignment["person_seniority"] = seniority_value
+                modified_assignments.append(updated_assignment)
+            if validation_error:
+                form_error = validation_error
+            else:
+                current_assignments = modified_assignments
+                assignment_lookup = {item["slot_id"]: item for item in current_assignments}
+                if submit_action == "save":
+                    _store_plan_assignments(unit_id, plan_type, current_assignments, year, month)
+                    return redirect(
+                        url_for(
+                            "planla",
+                            year=year,
+                            month=month,
+                            plan_type=plan_type,
+                            approval_message=_("Plan kaydedildi."),
+                        )
+                    )
+                else:
+                    form_message = _("Değişiklikler uygulandı, kaydetmek için onaylayın.")
+
+    def eligible_staff(slot_kind: str, selected_staff_id: Optional[int]) -> List[Dict[str, Any]]:
+        options: List[Dict[str, Any]] = []
+        for staff in staff_records:
+            allow = True
+            title_value = (staff.get("title") or "").strip().lower()
+            if slot_kind == "nobet":
+                night_flag = int(staff.get("night_duty_exempt") or 0)
+                if not title_value.startswith("asst") or night_flag:
+                    allow = False
+            if allow or (selected_staff_id is not None and staff["id"] == selected_staff_id):
+                options.append(
+                    {
+                        "id": staff["id"],
+                        "name": staff.get("name"),
+                        "title": staff.get("title"),
+                    }
+                )
+        options.sort(key=lambda item: ((item.get("title") or "").lower(), (item.get("name") or "").lower()))
+        return options
+
+    editable_assignments: List[Dict[str, Any]] = []
+    for assignment in current_assignments:
+        slot_id = assignment.get("slot_id")
+        slot_label = assignment.get("label")
+        start_iso = assignment.get("start") or ""
+        assignment_date = start_iso.split("T")[0] if "T" in start_iso else start_iso
+        clinic_id = _extract_clinic_id(slot_id) if slot_id else None
+        clinic_name = clinic_map.get(clinic_id) if clinic_id is not None else None
+        person_identifier = assignment.get("person_id") or ""
+        current_staff_id = _safe_int(person_identifier.split("_", 1)[1]) if person_identifier.startswith("staff_") else None
+        slot_kind = "clinic" if clinic_id is not None else "nobet"
+        options = eligible_staff(slot_kind, current_staff_id)
+        try:
+            day_type_value = _classify_day_type(date.fromisoformat(assignment_date)) if assignment_date else "weekday"
+        except (ValueError, TypeError):
+            day_type_value = "weekday"
+        editable_assignments.append(
+            {
+                "slot_id": slot_id,
+                "label": slot_label,
+                "assignment_date": assignment_date,
+                "clinic_name": clinic_name,
+                "current_staff_id": current_staff_id,
+                "options": options,
+                "day_type": day_type_value,
+            }
+        )
+
+    month_label = next((label for value, label in MONTH_OPTIONS if value == month), str(month))
+    period_label = f"{_(month_label)} {year}"
+
+    plan_hint = _("Klinik planı") if plan_type == "clinic" else _("Nöbet planı")
+
+    return render_template(
+        "plan_duzenle.html",
+        plan_type=plan_type,
+        year=year,
+        month=month,
+        editable_assignments=editable_assignments,
+        form_message=form_message,
+        form_error=form_error,
+        period_label=period_label,
+        plan_hint=plan_hint,
+    )
 @app.route("/planla/approve", methods=["POST"])
 @login_required
 def planla_approve():
@@ -1739,63 +2177,7 @@ def planla_approve():
         )
 
     assignments = result.get("assignments") or []
-    new_entries: List[Tuple[int, Optional[int], str, str]] = []
-    store_clinic = plan_type_raw == "clinic"
-    store_night = plan_type_raw == "nobet"
-    for assignment in assignments:
-        slot_id = assignment.get("slot_id") or ""
-        if store_clinic:
-            if not slot_id.startswith("clinic_"):
-                continue
-            clinic_id = _extract_clinic_id(slot_id)
-            if clinic_id is None:
-                continue
-        elif store_night:
-            if not slot_id.startswith("duty_"):
-                continue
-            clinic_id = None
-        else:
-            continue
-        person_identifier = assignment.get("person_id") or ""
-        if not person_identifier.startswith("staff_"):
-            continue
-        try:
-            staff_id = int(person_identifier.split("_", 1)[1])
-        except ValueError:
-            continue
-        start_iso = assignment.get("start")
-        try:
-            assignment_date_obj = datetime.fromisoformat(start_iso).date()
-        except (TypeError, ValueError):
-            continue
-        day_type = _classify_day_type(assignment_date_obj)
-        new_entries.append((staff_id, clinic_id, assignment_date_obj.isoformat(), day_type))
-
-    plan_period = _plan_period(year, month)
-    existing_rows = list(list_assignment_history(unit_id, plan_period))
-    preserved_entries: List[Tuple[int, Optional[int], str, str]] = []
-    for record in existing_rows:
-        staff_id = _safe_int(record.get("staff_id"))
-        assignment_date = record.get("assignment_date")
-        if staff_id is None or not assignment_date:
-            continue
-        clinic_id_existing = record.get("clinic_id")
-        day_type_existing = (record.get("day_type") or "weekday").strip().lower()
-        if day_type_existing not in {"weekday", "weekend"}:
-            day_type_existing = "weekday"
-        entry_tuple = (staff_id, clinic_id_existing, assignment_date, day_type_existing)
-        if store_clinic:
-            if clinic_id_existing is None:
-                preserved_entries.append(entry_tuple)
-        elif store_night:
-            if clinic_id_existing is not None:
-                preserved_entries.append(entry_tuple)
-        else:
-            preserved_entries.append(entry_tuple)
-
-    combined_entries = preserved_entries + new_entries
-    if combined_entries or store_clinic or store_night:
-        replace_assignment_history(unit_id, plan_period, combined_entries)
+    _store_plan_assignments(unit_id, plan_type_raw, assignments, year, month)
 
     return redirect(
         url_for(
