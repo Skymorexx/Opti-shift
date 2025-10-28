@@ -7,7 +7,7 @@ import sqlite3
 from collections import defaultdict
 from datetime import date, datetime, timedelta
 from functools import wraps
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 try:
     import pandas as pd
@@ -23,11 +23,14 @@ from src.db import (
     DEFAULT_ROTATION_PERIOD,
     add_clinic,
     add_clinic_seniority_rule,
+    add_duty_seniority_rule,
     add_duty_type,
     add_staff,
     add_leave_request,
     delete_clinic,
     delete_clinic_seniority_rule,
+    delete_duty_type,
+    delete_duty_seniority_rule,
     delete_staff,
     delete_leave_request,
     create_unit,
@@ -40,6 +43,7 @@ from src.db import (
     list_assignment_history,
     list_clinic_seniority_rules,
     list_clinics,
+    list_duty_seniority_rules,
     list_duty_types,
     list_leave_requests,
     list_staff,
@@ -92,6 +96,15 @@ SENIORITY_CHOICES = [
 ]
 SENIORITY_LABELS = {value: label for value, label in SENIORITY_CHOICES}
 
+EDUCATION_YEAR_CHOICES = [
+    (1, "1. Y\u0131l"),
+    (2, "2. Y\u0131l"),
+    (3, "3. Y\u0131l"),
+    (4, "4. Y\u0131l"),
+    (5, "5. Y\u0131l"),
+]
+EDUCATION_YEAR_LABELS = {value: label for value, label in EDUCATION_YEAR_CHOICES}
+
 SUPPORTED_LANGUAGES = {
     "tr": "Türkçe",
     "en": "English",
@@ -119,6 +132,23 @@ TRANSLATIONS = {
         "{month} {year}": "{month} {year}",
         "İcap Nöbeti Dağılımı": "On-call Duty Distribution",
         "Gece Nöbeti Dağılımı": "Night Duty Distribution",
+        "Eğitim Yılı": "Training Year",
+        "Eğitim yılı seçin": "Select training year",
+        "Eğitim yılı yok": "No training year",
+        "Eğitim yılı": "Training year",
+        "Gece Nöbetinden Muaf": "Exempt from night duty",
+        "Nöbet Muaf": "Night-duty exempt",
+        "Nöbet": "Duty",
+        "İcap": "On-call duty",
+        "İcap nöbeti uzmanlar tarafından tutulur.": "On-call duty is handled by specialists.",
+        "İcap nöbeti için kıdem kuralı tanımlanamaz.": "Seniority rules cannot be defined for on-call duty.",
+        "Nöbet türü silinemedi.": "Duty type could not be deleted.",
+        "Henüz kural yok.": "No rules yet.",
+        "1. Yıl": "Year 1",
+        "2. Yıl": "Year 2",
+        "3. Yıl": "Year 3",
+        "4. Yıl": "Year 4",
+        "5. Yıl": "Year 5",
         "Planı Onayla": "Approve Plan",
         "Onaylanan planın atamaları {period} dönemi için saklanır ve gelecek ayın adalet hesabında kullanılır.": "Approved assignments are stored for {period} and used in next month’s fairness calculation.",
         "Planı Onayla ve Kaydet": "Approve and Save Plan",
@@ -298,6 +328,7 @@ TRANSLATIONS = {
         "Personel kaydı bulunamadı.": "Staff record not found.",
         "Yalnızca Asst. Dr. kayıtları güncellenebilir.": "Only Assistant Doctor records can be updated.",
         "Geçerli kıdem seçin.": "Select a valid seniority.",
+        "Geçerli eğitim yılı seçin.": "Select a valid education year.",
         "Minimum nöbet sayısı maksimumdan büyük olamaz.": "Minimum duty count cannot exceed the maximum.",
         "Nöbet sınırları negatif olamaz.": "Duty limits cannot be negative.",
         "Lütfen ad soyad girin.": "Enter a full name.",
@@ -491,6 +522,19 @@ def _extract_clinic_id(slot_identifier: str) -> Optional[int]:
         return int(parts[1])
     except ValueError:
         return None
+
+
+def _clinic_slot_position(slot_identifier: str) -> int:
+    """Return the slot position index for multi-assistant clinic duties."""
+    if not slot_identifier.startswith("clinic_"):
+        return 1
+    parts = slot_identifier.split("_")
+    if len(parts) >= 4:
+        try:
+            return int(parts[3])
+        except ValueError:
+            return 1
+    return 1
 
 
 def _classify_day_type(day_value: date) -> str:
@@ -740,8 +784,100 @@ def compute_plan(unit_id: int, year=None, month=None, plan_type: str = "clinic",
 
     duty_rows_source = duty_types if duty_types is not None else list(list_duty_types(unit_id))
     duty_type_records = [dict(row) for row in duty_rows_source]
+    duty_rule_rows = [dict(row) for row in list(list_duty_seniority_rules(unit_id))]
+    duty_rule_map: Dict[int, Dict[str, int]] = defaultdict(dict)
+    for rule in duty_rule_rows:
+        duty_id_raw = rule.get("duty_type_id")
+        try:
+            duty_id_int = int(duty_id_raw)
+        except (TypeError, ValueError):
+            continue
+        seniority_key = (rule.get("required_seniority") or "").strip().lower()
+        if not seniority_key:
+            continue
+        try:
+            count_value = int(rule.get("required_count", 0))
+        except (TypeError, ValueError):
+            continue
+        duty_rule_map[duty_id_int][seniority_key] = count_value
 
     people = people_from_records(staff_records)
+    staff_person_map: Dict[int, Any] = {}
+    for person in people:
+        identifier = getattr(person, "identifier", "")
+        if not isinstance(identifier, str) or not identifier.startswith("staff_"):
+            continue
+        try:
+            staff_id_value = int(identifier.split("_", 1)[1])
+        except (IndexError, ValueError):
+            continue
+        staff_person_map[staff_id_value] = person
+
+    clinic_forbidden_people_map: Dict[int, Set[str]] = defaultdict(set)
+    auto_assign_clinics: Dict[int, Any] = {}
+    for clinic in clinic_records:
+        clinic_id_raw = clinic.get("id")
+        try:
+            clinic_id_int = int(clinic_id_raw)
+        except (TypeError, ValueError):
+            continue
+        responsible_id = clinic.get("sorumlu_uzman_id")
+        if responsible_id is None:
+            continue
+        responsible_person = staff_person_map.get(responsible_id)
+        if responsible_person is None:
+            continue
+        if clinic_rule_map.get(clinic_id_int):
+            clinic_forbidden_people_map[clinic_id_int].add(responsible_person.identifier)
+        else:
+            auto_assign_clinics[clinic_id_int] = responsible_person
+    clinic_forbidden_payload = {
+        clinic_id: sorted(list(identifiers))
+        for clinic_id, identifiers in clinic_forbidden_people_map.items()
+        if identifiers
+    }
+
+    def _person_is_assistant(person_obj: Any) -> bool:
+        title_value = (getattr(person_obj, "title", "") or "").strip().lower()
+        if title_value.startswith("asst"):
+            return True
+        return getattr(person_obj, "education_year", None) is not None
+
+    assistant_people = [person for person in people if _person_is_assistant(person)]
+    total_assistants = len(assistant_people)
+    clinic_slot_limits: Dict[int, int] = {}
+    for clinic in clinic_records:
+        rules_for_clinic = clinic_rule_map.get(_safe_int(clinic.get("id")))
+        if not rules_for_clinic:
+            continue
+        if rules_for_clinic.get("uzman"):
+            continue
+        clinic_id_raw = clinic.get("id")
+        try:
+            clinic_id_int = int(clinic_id_raw)
+        except (TypeError, ValueError):
+            continue
+        required_raw = clinic.get("required_assistants")
+        try:
+            required_assistants = int(required_raw) if required_raw is not None else 0
+        except (TypeError, ValueError):
+            required_assistants = 0
+        if required_assistants < 0:
+            required_assistants = 0
+        rule_total = 0
+        for count_value in rules_for_clinic.values():
+            try:
+                rule_total += max(int(count_value), 0)
+            except (TypeError, ValueError):
+                continue
+        desired_positions = max(required_assistants, rule_total)
+        if total_assistants == 0:
+            clinic_slot_limits[clinic_id_int] = 0
+            continue
+        if total_assistants and total_assistants < desired_positions:
+            clinic_slot_limits[clinic_id_int] = max(0, total_assistants)
+        else:
+            clinic_slot_limits[clinic_id_int] = desired_positions
 
     if normalized_plan == "nobet":
         nobet_duty_types = [
@@ -753,22 +889,30 @@ def compute_plan(unit_id: int, year=None, month=None, plan_type: str = "clinic",
             (row for row in nobet_duty_types if (row.get("name") or "").strip().lower() == "cap"),
             None,
         )
-        if cap_definition is None:
-            error = _("İcap nöbeti tanımı bulunamadı. /nöbetler sayfasından ekleyin.")
-            return None, error, 400
 
-        night_duties = [row for row in nobet_duty_types if row is not cap_definition]
+        if cap_definition is not None:
+            night_duties = [row for row in nobet_duty_types if row is not cap_definition]
+            try:
+                cap_result = build_cap_plan(
+                    people=people,
+                    cap_duty=cap_definition,
+                    year=selected_year,
+                    month=selected_month,
+                    leave_requests=leave_requests_map,
+                )
+            except ValueError as exc:
+                return None, _(str(exc)), 400
+        else:
+            night_duties = nobet_duty_types
+            cap_result = {
+                "assignments": [],
+                "loads": [],
+                "text": "",
+                "cap_summary": [],
+                "status_label": None,
+            }
+            fallback_notes.append(_("İcap tanımı bulunamadı; gece nöbeti icapsız planlandı."))
 
-        try:
-            cap_result = build_cap_plan(
-                people=people,
-                cap_duty=cap_definition,
-                year=selected_year,
-                month=selected_month,
-                leave_requests=leave_requests_map,
-            )
-        except ValueError as exc:
-            return None, _(str(exc)), 400
         try:
             night_result = build_night_plan(
                 people=people,
@@ -777,11 +921,12 @@ def compute_plan(unit_id: int, year=None, month=None, plan_type: str = "clinic",
                 month=selected_month,
                 leave_requests=leave_requests_map,
                 weekend_history=weekend_history_counts,
+                duty_seniority_rules=duty_rule_map,
             )
         except ValueError as exc:
             return None, _(str(exc)), 400
 
-        combined_assignments = cap_result["assignments"] + night_result["assignments"]
+        combined_assignments = cap_result.get("assignments", []) + night_result["assignments"]
         combined_assignments.sort(key=lambda item: item.get("start") or "")
 
         result = {
@@ -806,64 +951,171 @@ def compute_plan(unit_id: int, year=None, month=None, plan_type: str = "clinic",
 
         if not clinic_records and not mesa_duty_types:
             error = _(
-                "Planlama için en az bir klinik veya mesai görevi ekleyin. /klinikler ve /nöbetler sayfalarını kullanabilirsiniz."
+                "Planlama iAin en az bir klinik veya mesai gArevi ekleyin. /klinikler ve /nAbetler sayfalarn kullanabilirsiniz."
             )
             return None, error, 400
 
-        slots = slots_from_records(
+        raw_slots = slots_from_records(
             clinics=clinic_records,
             duty_types=mesa_duty_types,
             year=selected_year,
             month=selected_month,
             plan_type=normalized_plan,
         )
-        if not slots:
-            error = _("Bu verilerle oluşturulacak slot bulunamadı. Klinik ve görev tanımlarınızı kontrol edin.")
+        filtered_slots: List[Any] = []
+        for slot in raw_slots:
+            clinic_id_for_slot = _extract_clinic_id(slot.identifier)
+            if clinic_id_for_slot is None:
+                filtered_slots.append(slot)
+                continue
+            limit_value = clinic_slot_limits.get(clinic_id_for_slot)
+            if limit_value is None:
+                filtered_slots.append(slot)
+                continue
+            if limit_value <= 0:
+                continue
+            position_idx = _clinic_slot_position(slot.identifier)
+            if position_idx <= limit_value:
+                filtered_slots.append(slot)
+        raw_slots = filtered_slots
+        manual_slots_by_clinic: Dict[int, List[Any]] = defaultdict(list)
+        solver_slots: List[Any] = []
+        for slot in raw_slots:
+            clinic_id_for_slot = _extract_clinic_id(slot.identifier)
+            if clinic_id_for_slot is not None and clinic_id_for_slot in auto_assign_clinics:
+                manual_slots_by_clinic[clinic_id_for_slot].append(slot)
+            else:
+                solver_slots.append(slot)
+        slots = solver_slots
+        if not slots and not manual_slots_by_clinic:
+            error = _("Bu verilerle oluYturulacak slot bulunamad. Klinik ve gArev tanmlarn kontrol edin.")
             return None, error, 400
 
         clinic_rules_map = {cid: dict(rules) for cid, rules in clinic_rule_map.items()}
-        try:
-            result = solve_schedule(
-                people=people,
-                slots=slots,
-                clinic_rotation_periods=clinic_rotation_periods,
-                clinic_seniority_rules=clinic_rules_map,
-                clinic_repeat_history=clinic_repeat_payload,
-                staff_leave_requests=leave_requests_map,
-            )
-        except RuntimeError as exc:
+        if slots:
             try:
                 result = solve_schedule(
                     people=people,
                     slots=slots,
                     clinic_rotation_periods=clinic_rotation_periods,
                     clinic_seniority_rules=clinic_rules_map,
-                    clinic_repeat_history=None,
+                    clinic_forbidden_people=clinic_forbidden_payload,
+                    duty_seniority_rules=duty_rule_map,
+                    clinic_repeat_history=clinic_repeat_payload,
                     staff_leave_requests=leave_requests_map,
                 )
-                fallback_notes.append(
-                    _("Çözüm bulunamadığı için tekrar cezası devre dışı bırakıldı; ardışık klinik atamaları oluşabilir.")
-                )
-            except RuntimeError:
+            except RuntimeError as exc:
                 try:
                     result = solve_schedule(
                         people=people,
                         slots=slots,
                         clinic_rotation_periods=clinic_rotation_periods,
-                        clinic_seniority_rules=None,
+                        clinic_seniority_rules=clinic_rules_map,
+                        clinic_forbidden_people=clinic_forbidden_payload,
+                        duty_seniority_rules=duty_rule_map,
                         clinic_repeat_history=None,
                         staff_leave_requests=leave_requests_map,
                     )
                     fallback_notes.append(
-                        _("Kıdem gereksinimleri gevşetildi; klinik kadrosunu manuel olarak gözden geçirin.")
+                        _("AAzAm bulunamadY iAin tekrar cezas devre drakld; ardk klinik atamalar oluYabilir.")
                     )
-                except RuntimeError as exc_final:
-                    error = _("Planlama sırasında hata oluştu: {detay}", detay=exc_final)
-                    return None, error, 500
-        except Exception as exc:  # pragma: no cover - safeguarding prototype
-            error = _("Planlama sırasında hata oluştu: {detay}", detay=exc)
-            return None, error, 500
+                except RuntimeError:
+                    try:
+                        result = solve_schedule(
+                            people=people,
+                            slots=slots,
+                            clinic_rotation_periods=clinic_rotation_periods,
+                            clinic_seniority_rules=None,
+                            clinic_forbidden_people=clinic_forbidden_payload,
+                            duty_seniority_rules=duty_rule_map,
+                            clinic_repeat_history=None,
+                            staff_leave_requests=leave_requests_map,
+                        )
+                        fallback_notes.append(
+                            _("Kdem gereksinimleri gevYetildi; klinik kadrosunu manuel olarak gAzden geAirin.")
+                        )
+                    except RuntimeError as exc_final:
+                        error = _("Planlama srasnda hata oluYtu: {detay}", detay=exc_final)
+                        return None, error, 500
+            except Exception as exc:  # pragma: no cover - safeguarding prototype
+                error = _("Planlama srasnda hata oluYtu: {detay}", detay=exc)
+                return None, error, 500
+        else:
+            result = {
+                "status_label": "OK",
+                "status_code": None,
+                "objective_value": 0,
+                "assignments": [],
+                "loads": [],
+                "text": "",
+            }
 
+        if manual_slots_by_clinic:
+            manual_assignments: List[Dict[str, Any]] = []
+            existing_assignments = result.get("assignments") or []
+            load_entries = result.get("loads") or []
+            load_map: Dict[str, Dict[str, Any]] = {}
+            for load_entry in load_entries:
+                person_id = load_entry.get("person_id")
+                if person_id:
+                    load_map[person_id] = load_entry
+            for clinic_id, slot_list in manual_slots_by_clinic.items():
+                responsible_person = auto_assign_clinics.get(clinic_id)
+                if responsible_person is None:
+                    continue
+                for slot in slot_list:
+                    manual_assignments.append(
+                        {
+                            "slot_id": slot.identifier,
+                            "duty_type": slot.duty_type,
+                            "label": slot.label or slot.identifier,
+                            "start": slot.start.isoformat(),
+                            "duration_hours": slot.duration_hours,
+                            "requires_extended_rest": slot.requires_extended_rest,
+                            "person_id": responsible_person.identifier,
+                            "person_name": responsible_person.display_name,
+                            "person_title": responsible_person.title,
+                            "person_seniority": responsible_person.seniority,
+                        }
+                    )
+                    load_entry = load_map.get(responsible_person.identifier)
+                    if load_entry is None:
+                        target_slots = (
+                            responsible_person.preferred_load()
+                            if hasattr(responsible_person, "preferred_load")
+                            else 0
+                        )
+                        load_entry = {
+                            "person_id": responsible_person.identifier,
+                            "person_name": responsible_person.display_name,
+                            "title": responsible_person.title,
+                            "seniority": responsible_person.seniority,
+                            "assigned_slots": 0,
+                            "target_slots": target_slots,
+                            "deviation": -target_slots,
+                            "assigned_hours": 0,
+                            "weekend_assigned": 0,
+                            "weekend_history": 0,
+                            "min_limit": getattr(responsible_person, "min_night_duties", None),
+                            "max_limit": getattr(responsible_person, "max_night_duties", None),
+                        }
+                        load_map[responsible_person.identifier] = load_entry
+                    load_entry["assigned_slots"] = load_entry.get("assigned_slots", 0) + 1
+                    load_entry["assigned_hours"] = load_entry.get("assigned_hours", 0) + int(slot.duration_hours or 0)
+                    weekend_count = load_entry.get("weekend_assigned", 0)
+                    if slot.start.weekday() >= 5:
+                        weekend_count += 1
+                    load_entry["weekend_assigned"] = weekend_count
+                    target_slots = load_entry.get("target_slots") or 0
+                    load_entry["deviation"] = load_entry["assigned_slots"] - target_slots
+            if manual_assignments:
+                combined_assignments = existing_assignments + manual_assignments
+                combined_assignments.sort(key=lambda item: item.get("start") or "")
+                result["assignments"] = combined_assignments
+                result["loads"] = sorted(
+                    load_map.values(),
+                    key=lambda entry: (entry.get("person_name") or "").lower(),
+                )
     result["selected_year"] = selected_year
     result["selected_month"] = selected_month
     result["plan_type"] = normalized_plan
@@ -1028,7 +1280,7 @@ def build_cap_plan(*, people, cap_duty, year, month, leave_requests=None):
     return result
 
 
-def build_night_plan(*, people, night_duties, year, month, leave_requests=None, weekend_history=None):
+def build_night_plan(*, people, night_duties, year, month, leave_requests=None, weekend_history=None, duty_seniority_rules=None, duty_senorty_rules=None):
     if not night_duties:
         return {
             "assignments": [],
@@ -1039,10 +1291,14 @@ def build_night_plan(*, people, night_duties, year, month, leave_requests=None, 
             "objective_value": 0,
         }
 
+    if duty_seniority_rules is None and duty_senorty_rules is not None:
+        duty_seniority_rules = duty_senorty_rules
+
     assistant_people = [
         person
         for person in people
         if (person.title or "").strip().lower().startswith("asst")
+        and not getattr(person, "night_duty_exempt", False)
     ]
     for assistant in assistant_people:
         if (
@@ -1087,6 +1343,7 @@ def build_night_plan(*, people, night_duties, year, month, leave_requests=None, 
             clinic_repeat_history=None,
             staff_leave_requests=leave_requests,
             weekend_history_counts=weekend_history_map,
+            duty_seniority_rules=duty_seniority_rules,
             objective_mode="balanced",
         )
     except RuntimeError:
@@ -1099,6 +1356,7 @@ def build_night_plan(*, people, night_duties, year, month, leave_requests=None, 
                 clinic_repeat_history=None,
                 staff_leave_requests=leave_requests,
                 weekend_history_counts=None,
+                duty_seniority_rules=duty_seniority_rules,
                 objective_mode="balanced",
             )
         except RuntimeError as exc:
@@ -1636,6 +1894,9 @@ def personel():
     seniority_options = SENIORITY_CHOICES
     night_limit_options = list(range(0, 11))
     allowed_seniority_values = {value for value, _label in seniority_options}
+    education_year_options = EDUCATION_YEAR_CHOICES
+    education_year_labels = EDUCATION_YEAR_LABELS
+    allowed_education_years = {value for value, _label in education_year_options}
     unit_id = _require_unit_id()
 
     if request.method == "POST":
@@ -1663,8 +1924,20 @@ def personel():
                     max_night_raw = (request.form.get("max_night") or "").strip()
                     min_night_value = _safe_int(min_night_raw) if min_night_raw != "" else None
                     max_night_value = _safe_int(max_night_raw) if max_night_raw != "" else None
+                    education_year_raw = (request.form.get("education_year") or "").strip()
+                    education_year_value = None
+                    education_year_invalid = False
+                    if education_year_raw != "":
+                        parsed_education_year = _safe_int(education_year_raw)
+                        if parsed_education_year is None or parsed_education_year not in allowed_education_years:
+                            education_year_invalid = True
+                        else:
+                            education_year_value = parsed_education_year
+                    night_duty_exempt_value = request.form.get("night_duty_exempt") == "1"
 
-                    if seniority_raw not in allowed_seniority_values:
+                    if education_year_invalid:
+                        error = _("Geçerli eğitim yılı seçin.")
+                    elif seniority_raw not in allowed_seniority_values:
                         error = _("Geçerli kıdem seçin.")
                     elif (
                         min_night_value is not None
@@ -1682,6 +1955,8 @@ def personel():
                             seniority=seniority_raw,
                             min_night=min_night_value,
                             max_night=max_night_value,
+                            education_year=education_year_value,
+                            night_duty_exempt=night_duty_exempt_value,
                             unit_id=unit_id,
                         )
                         return redirect(url_for("personel"))
@@ -1691,10 +1966,13 @@ def personel():
             seniority_raw = (request.form.get("seniority") or "").strip()
             min_night_raw = (request.form.get("min_night") or "").strip()
             max_night_raw = (request.form.get("max_night") or "").strip()
+            education_year_raw = (request.form.get("education_year") or "").strip()
 
             min_night_value = _safe_int(min_night_raw) if min_night_raw else None
             max_night_value = _safe_int(max_night_raw) if max_night_raw else None
             seniority_value = None
+            education_year_value = None
+            night_duty_exempt_value = False
 
             if not name:
                 error = _("Lütfen ad soyad girin.")
@@ -1715,12 +1993,21 @@ def personel():
                     error = _("Minimum nöbet sayısı maksimumdan büyük olamaz.")
                 else:
                     seniority_value = seniority_raw
+                    night_duty_exempt_value = request.form.get("night_duty_exempt") == "1"
+                    if education_year_raw != "":
+                        parsed_education_year = _safe_int(education_year_raw)
+                        if parsed_education_year is None or parsed_education_year not in allowed_education_years:
+                            error = _("Geçerli eğitim yılı seçin.")
+                        else:
+                            education_year_value = parsed_education_year
             else:
                 if min_night_value is not None or max_night_value is not None:
                     error = _("Nöbet sınırları yalnızca Asst. Dr. için girilebilir.")
                 seniority_value = None
                 min_night_value = None
                 max_night_value = None
+                education_year_value = None
+                night_duty_exempt_value = False
 
             if error is None:
                 add_staff(
@@ -1729,11 +2016,13 @@ def personel():
                     seniority=seniority_value,
                     min_night=min_night_value if title == "Asst. Dr." else None,
                     max_night=max_night_value if title == "Asst. Dr." else None,
+                    education_year=education_year_value if title == "Asst. Dr." else None,
+                    night_duty_exempt=night_duty_exempt_value if title == "Asst. Dr." else False,
                     unit_id=unit_id,
                 )
                 return redirect(url_for("personel"))
         else:
-            error = _("Bilinmeyen işlem tipi.")
+            error = _("Bilinmeyen islem tipi.")
 
     staff_records = list(list_staff(unit_id))
     return render_template(
@@ -1744,6 +2033,8 @@ def personel():
         title_options=title_options,
         seniority_labels=dict(seniority_options),
         night_limit_options=night_limit_options,
+        education_year_options=education_year_options,
+        education_year_labels=education_year_labels,
     )
 
 
@@ -1808,7 +2099,7 @@ def izinler():
                         )
                         return redirect(url_for("izinler"))
         else:
-            error = _("Bilinmeyen işlem tipi.")
+            error = _("Bilinmeyen islem tipi.")
 
     leave_rows = [dict(row) for row in list(list_leave_requests(unit_id))]
     leave_entries = []
@@ -1948,7 +2239,7 @@ def klinikler():
                 delete_clinic(clinic_id, unit_id)
                 return redirect(url_for("klinikler"))
         else:
-            error = _("Bilinmeyen işlem tipi.")
+            error = _("Bilinmeyen islem tipi.")
 
     staff_name_map = {row["id"]: row.get("name") for row in staff_rows}
     rules_lookup = defaultdict(list)
@@ -1997,6 +2288,23 @@ def klinikler():
 def nobetler():
     error = None
     unit_id = _require_unit_id()
+
+    duty_types = [dict(row) for row in list(list_duty_types(unit_id))]
+    duty_rules = [dict(row) for row in list(list_duty_seniority_rules(unit_id))]
+    duty_type_map = {row["id"]: row for row in duty_types}
+
+    rules_lookup: Dict[int, List[Dict[str, Any]]] = defaultdict(list)
+    for rule in duty_rules:
+        duty_id = rule.get("duty_type_id")
+        try:
+            rule["required_count"] = int(rule.get("required_count") or 0)
+        except (TypeError, ValueError):
+            rule["required_count"] = 0
+        seniority_key = (rule.get("required_seniority") or "").strip().lower()
+        rule["required_seniority"] = seniority_key
+        rule["seniority_label"] = SENIORITY_LABELS.get(seniority_key, seniority_key.title())
+        rules_lookup[duty_id].append(rule)
+
     if request.method == "POST":
         action = (request.form.get("action") or "add").strip().lower()
         if action == "add":
@@ -2011,7 +2319,7 @@ def nobetler():
                 duration_raw = (request.form.get("duration_hours") or "").strip()
                 category_raw = (request.form.get("duty_category") or "nobet").strip().lower()
                 required_raw = request.form.get("required_staff_count")
-                required_value = _safe_int(required_raw) or 1
+                required_staff = _safe_int(required_raw) or 1
                 if not name or not duration_raw:
                     error = _("Lütfen tüm alanları doldurun.")
                 else:
@@ -2022,11 +2330,10 @@ def nobetler():
                     else:
                         if duration <= 0:
                             error = _("Süre sıfırdan büyük olmalıdır.")
-                        elif required_value < 1:
+                        elif required_staff < 1:
                             error = _("Geçerli bir personel sayısı girin.")
                         else:
                             category = category_raw if category_raw in {"mesa", "nobet"} else "nobet"
-                            required_staff = required_value
             if error is None:
                 try:
                     add_duty_type(
@@ -2039,9 +2346,97 @@ def nobetler():
                     return redirect(url_for("nobetler"))
                 except sqlite3.IntegrityError:
                     error = _("Bu isimde bir nöbet türü zaten mevcut.")
+        elif action == "add_rule":
+            duty_type_id = _safe_int(request.form.get("duty_type_id"))
+            seniority_choice = (request.form.get("required_seniority") or "").strip().lower()
+            count_value = _safe_int(request.form.get("required_count"))
+            duty_info = duty_type_map.get(duty_type_id)
+            if not duty_type_id or duty_info is None:
+                error = _("Geçerli bir nöbet türü seçin.")
+            elif (duty_info.get("name") or "").strip().lower() == "cap":
+                error = _("İcap nöbeti için kıdem kuralı tanımlanamaz.")
+            elif seniority_choice not in {choice[0] for choice in SENIORITY_CHOICES}:
+                error = _("Geçerli kıdem seçin.")
+            elif count_value is None or count_value < 0:
+                error = _("Geçerli bir adet girin.")
+            else:
+                try:
+                    required_staff = int(duty_info.get("required_staff_count") or 1)
+                except (TypeError, ValueError):
+                    required_staff = 1
+                existing_rules = rules_lookup.get(duty_type_id, [])
+                current_total = sum(int(rule.get("required_count") or 0) for rule in existing_rules)
+                existing_same = next(
+                    (
+                        rule
+                        for rule in existing_rules
+                        if (rule.get("required_seniority") or "").strip().lower() == seniority_choice
+                    ),
+                    None,
+                )
+                existing_count = int(existing_same.get("required_count", 0)) if existing_same else 0
+                future_total = current_total - existing_count + count_value
+                if future_total > required_staff:
+                    error = _("Kıdem dağılımı toplamı gerekli personel sayısını geçemez.")
+                else:
+                    add_duty_seniority_rule(
+                        duty_type_id,
+                        seniority_choice,
+                        count_value,
+                        unit_id=unit_id,
+                    )
+                    return redirect(url_for("nobetler"))
+        elif action == "delete_rule":
+            rule_id = _safe_int(request.form.get("rule_id"))
+            if rule_id:
+                delete_duty_seniority_rule(rule_id, unit_id)
+            return redirect(url_for("nobetler"))
+        elif action == "delete_duty":
+            duty_type_id = _safe_int(request.form.get("duty_type_id"))
+            duty_info = duty_type_map.get(duty_type_id)
+            if not duty_type_id or duty_info is None:
+                error = _("Geçerli bir nöbet türü seçin.")
+            else:
+                try:
+                    delete_duty_type(duty_type_id, unit_id)
+                    return redirect(url_for("nobetler"))
+                except sqlite3.IntegrityError:
+                    error = _("Nöbet türü silinemedi.")
+        else:
+            error = _("Bilinmeyen islem tipi.")
 
-    duty_types = list(list_duty_types(unit_id))
-    return render_template("nobetler.html", duty_types=duty_types, error=error)
+    # Refresh duty data for rendering after any modifications
+    duty_types = [dict(row) for row in list(list_duty_types(unit_id))]
+    duty_rules = [dict(row) for row in list(list_duty_seniority_rules(unit_id))]
+    rules_lookup = defaultdict(list)
+    for rule in duty_rules:
+        duty_id = rule.get("duty_type_id")
+        try:
+            rule["required_count"] = int(rule.get("required_count") or 0)
+        except (TypeError, ValueError):
+            rule["required_count"] = 0
+        seniority_key = (rule.get("required_seniority") or "").strip().lower()
+        rule["required_seniority"] = seniority_key
+        rule["seniority_label"] = SENIORITY_LABELS.get(seniority_key, seniority_key.title())
+        rules_lookup[duty_id].append(rule)
+
+    for duty in duty_types:
+        duty_rules_for_type = sorted(
+            rules_lookup.get(duty.get("id"), []),
+            key=lambda item: item.get("seniority_label", ""),
+        )
+        duty["seniority_rules"] = duty_rules_for_type
+        try:
+            duty["required_staff_count"] = int(duty.get("required_staff_count") or 1)
+        except (TypeError, ValueError):
+            duty["required_staff_count"] = 1
+
+    return render_template(
+        "nobetler.html",
+        duty_types=duty_types,
+        seniority_options=SENIORITY_CHOICES,
+        error=error,
+    )
 
 
 

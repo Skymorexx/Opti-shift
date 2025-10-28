@@ -48,6 +48,19 @@
           {% endfor %}
         </select>
       </div>
+      <div id="education-year-group" style="display: none;">
+        <label class="form-label" for="education_year">{{ t('Eğitim Yılı') }}</label>
+        <select id="education_year" name="education_year" class="form-select">
+          <option value="">{{ t('Eğitim yılı seçin') }}</option>
+          {% for value, label in education_year_options %}
+            <option value="{{ value }}">{{ t(label) }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div id="night-exempt-row" class="form-check form-switch opt-form-switch" style="display: none;">
+        <input class="form-check-input" type="checkbox" id="night_duty_exempt" name="night_duty_exempt" value="1">
+        <label class="form-check-label" for="night_duty_exempt">{{ t('Gece Nöbetinden Muaf') }}</label>
+      </div>
       <div id="night-limits" class="opt-form-grid opt-form-grid--cols-2" style="display: none;">
         <div>
           <label class="form-label" for="min_night">{{ t('Minimum Aylık Nöbet') }}</label>
@@ -82,8 +95,10 @@
               <th scope="col">{{ t('Ad Soyad') }}</th>
               <th scope="col">{{ t('Ünvan') }}</th>
               <th scope="col">{{ t('Kıdem') }}</th>
+              <th scope="col">{{ t('Eğitim Yılı') }}</th>
               <th scope="col">{{ t('Minimum Nöbet') }}</th>
               <th scope="col">{{ t('Maksimum Nöbet') }}</th>
+              <th scope="col">{{ t('Nöbet Muaf') }}</th>
               <th scope="col">{{ t('İşlemler') }}</th>
             </tr>
           </thead>
@@ -95,8 +110,12 @@
                 <td><strong>{{ person['name'] }}</strong></td>
                 <td>{{ t(person['title']) }}</td>
                 <td>{{ t(seniority_labels.get(seniority_value, '-')) if seniority_value else '-' }}</td>
+                {% set education_year_value = person['education_year'] %}
+                {% set education_label = education_year_labels.get(education_year_value) %}
+                <td>{{ t(education_label) if education_label else '-' }}</td>
                 <td>{{ person["min_night_duties_per_month"] if person["min_night_duties_per_month"] is not none else '-' }}</td>
                 <td>{{ person["max_night_duties_per_month"] if person["max_night_duties_per_month"] is not none else '-' }}</td>
+                <td>{{ t('Evet') if person['night_duty_exempt'] else t('Hayır') }}</td>
                 <td>
                   <div class="opt-table-actions">
                     {% if person["title"] == "Asst. Dr." %}
@@ -106,6 +125,12 @@
                         <select name="seniority" class="form-select form-select-sm" aria-label="{{ t('Kıdem seçin') }}">
                           {% for value, label in seniority_options %}
                             <option value="{{ value }}" {% if person['seniority'] == value %}selected{% endif %}>{{ t(label) }}</option>
+                          {% endfor %}
+                        </select>
+                        <select name="education_year" class="form-select form-select-sm" aria-label="{{ t('Eğitim yılı') }}">
+                          <option value="" {% if person['education_year'] is none %}selected{% endif %}>{{ t('Eğitim yılı yok') }}</option>
+                          {% for value, label in education_year_options %}
+                            <option value="{{ value }}" {% if person['education_year'] == value %}selected{% endif %}>{{ t(label) }}</option>
                           {% endfor %}
                         </select>
                         <select name="min_night" class="form-select form-select-sm" aria-label="{{ t('Minimum nöbet') }}">
@@ -120,6 +145,10 @@
                             <option value="{{ value }}" {% if person['max_night_duties_per_month'] == value %}selected{% endif %}>{{ value }}</option>
                           {% endfor %}
                         </select>
+                        <div class="form-check form-switch">
+                          <input class="form-check-input" type="checkbox" id="night_exempt_{{ person['id'] }}" name="night_duty_exempt" value="1" {% if person['night_duty_exempt'] %}checked{% endif %}>
+                          <label class="form-check-label" for="night_exempt_{{ person['id'] }}">{{ t('Nöbet Muaf') }}</label>
+                        </div>
                         <button type="submit" class="btn btn-outline-primary btn-sm">{{ t('Kaydet') }}</button>
                       </form>
                     {% endif %}
@@ -150,6 +179,10 @@
       var titleSelect = document.getElementById('title');
       var seniorityGroup = document.getElementById('seniority-group');
       var senioritySelect = document.getElementById('seniority');
+      var educationGroup = document.getElementById('education-year-group');
+      var educationSelect = document.getElementById('education_year');
+      var nightExemptRow = document.getElementById('night-exempt-row');
+      var nightExemptCheckbox = document.getElementById('night_duty_exempt');
       var nightLimits = document.getElementById('night-limits');
       var minNightInput = document.getElementById('min_night');
       var maxNightInput = document.getElementById('max_night');
@@ -157,12 +190,18 @@
       function syncSeniority() {
         var needsSeniority = titleSelect.value === 'Asst. Dr.';
         seniorityGroup.style.display = needsSeniority ? 'block' : 'none';
+        educationGroup.style.display = needsSeniority ? 'block' : 'none';
+        nightExemptRow.style.display = needsSeniority ? 'flex' : 'none';
         senioritySelect.disabled = !needsSeniority;
+        educationSelect.disabled = !needsSeniority;
+        nightExemptCheckbox.disabled = !needsSeniority;
         nightLimits.style.display = needsSeniority ? 'grid' : 'none';
         minNightInput.disabled = !needsSeniority;
         maxNightInput.disabled = !needsSeniority;
         if (!needsSeniority) {
           senioritySelect.value = '';
+          educationSelect.value = '';
+          nightExemptCheckbox.checked = false;
           minNightInput.value = '';
           maxNightInput.value = '';
         }

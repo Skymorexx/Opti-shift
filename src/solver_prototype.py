@@ -77,6 +77,8 @@ class Person:
     allowed_duty_types: Tuple[str, ...] = ("*",)
     min_night_duties: Optional[int] = None
     max_night_duties: Optional[int] = None
+    education_year: Optional[int] = None
+    night_duty_exempt: bool = False
 
     def weight(self) -> int:
         return SENIORITY_WEIGHTS[self.seniority]
@@ -116,6 +118,9 @@ class SchedulingPrototype:
         enforce_person_limits: bool = False,
         clinic_rotation_days: Optional[Mapping[int, int]] = None,
         clinic_seniority_rules: Optional[Mapping[int, Mapping[str, int]]] = None,
+        clinic_forbidden_people: Optional[Mapping[int, Sequence[str]]] = None,
+        duty_seniority_rules: Optional[Mapping[int, Mapping[str, int]]] = None,
+        duty_senorty_rules: Optional[Mapping[int, Mapping[str, int]]] = None,
         repeat_history: Optional[Mapping[int, Sequence[str]]] = None,
         weekend_history_counts: Optional[Mapping[str, int]] = None,
         leave_calendar: Optional[Mapping[str, Sequence[Tuple[dt.date, dt.date]]]] = None,
@@ -164,6 +169,42 @@ class SchedulingPrototype:
                     normalized_rules[key] = count_int
                 if normalized_rules:
                     self.clinic_seniority_rules[clinic_id] = normalized_rules
+        self.clinic_forbidden_people: Dict[int, Set[str]] = {}
+        if clinic_forbidden_people:
+            for clinic_key, identifiers in clinic_forbidden_people.items():
+                try:
+                    clinic_id = int(clinic_key)
+                except (TypeError, ValueError):
+                    continue
+                normalized_people: Set[str] = {
+                    str(identifier).strip()
+                    for identifier in identifiers or []
+                    if isinstance(identifier, str) and str(identifier).strip()
+                }
+                if normalized_people:
+                    self.clinic_forbidden_people[clinic_id] = normalized_people
+        self.duty_seniority_rules: Dict[int, Dict[str, int]] = {}
+        rules_source = duty_seniority_rules or duty_senorty_rules or {}
+        if rules_source:
+            for duty_key, rules in rules_source.items():
+                try:
+                    duty_id = int(duty_key)
+                except (TypeError, ValueError):
+                    continue
+                normalized_rules: Dict[str, int] = {}
+                for seniority_key, count_value in (rules or {}).items():
+                    key = (seniority_key or "").strip().lower()
+                    if key not in SENIORITY_LEVELS:
+                        continue
+                    try:
+                        count_int = int(count_value)
+                    except (TypeError, ValueError):
+                        continue
+                    if count_int < 0:
+                        continue
+                    normalized_rules[key] = count_int
+                if normalized_rules:
+                    self.duty_seniority_rules[duty_id] = normalized_rules
         self.person_leave_windows: Dict[str, List[Tuple[dt.date, dt.date]]] = {}
         if leave_calendar:
             for identifier, windows in leave_calendar.items():
@@ -211,6 +252,8 @@ class SchedulingPrototype:
                 if normalized_people:
                     self.clinic_repeat_history[clinic_id] = normalized_people
         self.repeat_penalty_variables: List[cp_model.IntVar] = []
+        self.fallback_penalty_vars: List[cp_model.IntVar] = []
+        self.fallback_penalty_weight = max(10, len(self.slots))
         allowed_modes = {"seniority", "balanced"}
         self.objective_mode = objective_mode if objective_mode in allowed_modes else "seniority"
         self._validate_inputs()
@@ -223,6 +266,11 @@ class SchedulingPrototype:
         unknown_levels = {p.seniority for p in self.people if p.seniority not in SENIORITY_LEVELS}
         if unknown_levels:
             raise ValueError(f"Unknown seniority levels: {sorted(unknown_levels)}")
+
+    @staticmethod
+    def _is_assistant(person: Person) -> bool:
+        title = (person.title or "").strip().lower()
+        return title.startswith("asst") or person.education_year is not None
 
     def _person_on_leave_during_slot(self, person_identifier: str, slot: DutySlot) -> bool:
         """Return True if the slot overlaps with a leave window for the person."""
@@ -260,6 +308,17 @@ class SchedulingPrototype:
                 allowed = person.allowed_duty_types
                 if "*" not in allowed and slot.duty_type not in allowed:
                     continue
+                if slot.duty_type == "clinic":
+                    clinic_id, _position = self._parse_clinic_slot_identifier(slot.identifier)
+                    allow_specialist = False
+                    if clinic_id is not None:
+                        rules = self.clinic_seniority_rules.get(clinic_id, {})
+                        allow_specialist = bool(rules.get("uzman"))
+                        forbidden_people = self.clinic_forbidden_people.get(clinic_id)
+                        if forbidden_people and person.identifier in forbidden_people:
+                            continue
+                    if not allow_specialist and not self._is_assistant(person):
+                        continue
                 if self._person_on_leave_during_slot(person.identifier, slot):
                     continue
                 var_name = f"assign_p{p_idx}_s{s_idx}"
@@ -379,6 +438,35 @@ class SchedulingPrototype:
                 slot_list.sort(key=lambda item: item[1].start)
         return groups
 
+    @staticmethod
+    def _parse_duty_slot_identifier(identifier: str) -> Optional[int]:
+        """Extract duty type id from duty slot identifiers."""
+        if not identifier.startswith("duty_"):
+            return None
+        parts = identifier.split("_", 2)
+        if len(parts) < 2:
+            return None
+        try:
+            duty_id = int(parts[1])
+        except ValueError:
+            return None
+        return duty_id
+
+    def _collect_duty_slot_groups(self) -> Dict[int, Dict[str, List[int]]]:
+        """Group duty slots by duty type and calendar day."""
+        groups: Dict[int, Dict[str, List[int]]] = {}
+        for s_idx, slot in enumerate(self.slots):
+            if slot.duty_type != "duty":
+                continue
+            duty_id = self._parse_duty_slot_identifier(slot.identifier)
+            if duty_id is None:
+                continue
+            date_key = slot.start.date().isoformat()
+            date_map = groups.setdefault(duty_id, {})
+            date_map.setdefault(date_key, []).append(s_idx)
+        return groups
+
+
     def _enforce_clinic_rotation_and_seniority(
         self,
         model: cp_model.CpModel,
@@ -442,18 +530,78 @@ class SchedulingPrototype:
                 for seniority_key, required_count in clinic_rules.items():
                     if required_count <= 0:
                         continue
-                    matching_vars: List[cp_model.IntVar] = []
+                    exact_vars: List[cp_model.IntVar] = []
+                    fallback_vars: List[cp_model.IntVar] = []
                     for rep_idx in representative_indices:
                         for p_idx, person in enumerate(self.people):
-                            if person.seniority != seniority_key:
-                                continue
                             var = assignment_vars.get((p_idx, rep_idx))
-                            if var is not None:
-                                matching_vars.append(var)
-                    if matching_vars:
-                        model.Add(sum(matching_vars) == required_count)
-                    else:
+                            if var is None:
+                                continue
+                            if person.seniority == seniority_key:
+                                exact_vars.append(var)
+                            elif self._is_assistant(person):
+                                fallback_vars.append(var)
+                    if not exact_vars and not fallback_vars:
                         model.Add(0 == required_count)
+                        continue
+                    total_vars = exact_vars + fallback_vars
+                    model.Add(cp_model.LinearExpr.Sum(total_vars) == required_count)
+                    fallback_usage = model.NewIntVar(0, required_count, f"fallback_clinic_{clinic_id}_{block_key}_{seniority_key}")
+                    model.Add(
+                        fallback_usage
+                        == required_count - cp_model.LinearExpr.Sum(exact_vars)
+                    )
+                    self.fallback_penalty_vars.append(fallback_usage)
+
+    def _enforce_duty_seniority_rules(
+        self,
+        model: cp_model.CpModel,
+        assignment_vars: Dict[Tuple[int, int], cp_model.IntVar],
+    ) -> None:
+        """Apply seniority requirements for duty slots on each day."""
+        if not self.duty_seniority_rules:
+            return
+
+        grouped_slots = self._collect_duty_slot_groups()
+        if not grouped_slots:
+            return
+
+        for duty_id, date_map in grouped_slots.items():
+            duty_rules = self.duty_seniority_rules.get(duty_id, {})
+            if not duty_rules:
+                continue
+            for date_key, slot_indices in date_map.items():
+                if not slot_indices:
+                    continue
+                for seniority_key, required_count in duty_rules.items():
+                    if required_count <= 0:
+                        continue
+                    exact_vars: List[cp_model.IntVar] = []
+                    fallback_vars: List[cp_model.IntVar] = []
+                    for s_idx in slot_indices:
+                        for p_idx, person in enumerate(self.people):
+                            var = assignment_vars.get((p_idx, s_idx))
+                            if var is None:
+                                continue
+                            if person.seniority == seniority_key:
+                                exact_vars.append(var)
+                            elif self._is_assistant(person):
+                                fallback_vars.append(var)
+                    if not exact_vars and not fallback_vars:
+                        model.Add(0 == required_count)
+                        continue
+                    total_vars = exact_vars + fallback_vars
+                    model.Add(cp_model.LinearExpr.Sum(total_vars) == required_count)
+                    fallback_usage = model.NewIntVar(
+                        0,
+                        required_count,
+                        f"fallback_duty_{duty_id}_{date_key}_{seniority_key}",
+                    )
+                    model.Add(
+                        fallback_usage
+                        == required_count - cp_model.LinearExpr.Sum(exact_vars)
+                    )
+                    self.fallback_penalty_vars.append(fallback_usage)
 
     def _enforce_non_overlap_and_rest(
         self,
@@ -545,6 +693,9 @@ class SchedulingPrototype:
             [term for term in objective_terms]
             + [self.weekend_penalty_weight * term for term in weekend_terms]
         ) if (objective_terms or weekend_terms) else 0
+        if self.fallback_penalty_vars:
+            fallback_expr = cp_model.LinearExpr.Sum(self.fallback_penalty_vars)
+            objective_expr = objective_expr + self.fallback_penalty_weight * fallback_expr
         if self.repeat_penalty_variables:
             penalty_expr = cp_model.LinearExpr.Sum(self.repeat_penalty_variables)
             objective_expr = objective_expr + self.repeat_penalty_weight * penalty_expr
@@ -601,6 +752,9 @@ class SchedulingPrototype:
             [expr for expr in objective_expr]
             + [self.weekend_penalty_weight * term for term in weekend_terms]
         ) if (objective_expr or weekend_terms) else 0
+        if self.fallback_penalty_vars:
+            fallback_expr = cp_model.LinearExpr.Sum(self.fallback_penalty_vars)
+            objective_sum = objective_sum + self.fallback_penalty_weight * fallback_expr
         if self.repeat_penalty_variables:
             penalty_expr = cp_model.LinearExpr.Sum(self.repeat_penalty_variables)
             objective_sum = objective_sum + self.repeat_penalty_weight * penalty_expr
@@ -643,6 +797,7 @@ class SchedulingPrototype:
         assignment_vars = self._build_assignment_variables(model)
         self._enforce_slot_coverage(model, assignment_vars)
         self._enforce_clinic_rotation_and_seniority(model, assignment_vars)
+        self._enforce_duty_seniority_rules(model, assignment_vars)
         self._enforce_non_overlap_and_rest(model, assignment_vars)
         self._enforce_person_limits(model, assignment_vars)
         load_vars, hour_vars, weekend_vars, total_slots, total_hours = self._build_person_totals(model, assignment_vars)
@@ -846,6 +1001,16 @@ def people_from_records(records: Sequence[Mapping[str, Any]]) -> List[Person]:
             max_limit = None
         if min_limit is not None and max_limit is not None and min_limit > max_limit:
             min_limit, max_limit = None, None
+        education_raw = row_dict.get("education_year")
+        try:
+            education_year = int(education_raw) if education_raw is not None else None
+        except (TypeError, ValueError):
+            education_year = None
+        night_raw = row_dict.get("night_duty_exempt")
+        try:
+            night_flag = bool(int(night_raw))
+        except (TypeError, ValueError):
+            night_flag = bool(night_raw)
         people.append(
             Person(
                 identifier=identifier,
@@ -854,6 +1019,8 @@ def people_from_records(records: Sequence[Mapping[str, Any]]) -> List[Person]:
                 title=title or None,
                 min_night_duties=min_limit,
                 max_night_duties=max_limit,
+                education_year=education_year,
+                night_duty_exempt=night_flag,
             )
         )
     return people
@@ -999,12 +1166,18 @@ def solve_schedule(
     *,
     clinic_rotation_periods: Optional[Mapping[int, str]] = None,
     clinic_seniority_rules: Optional[Mapping[int, Mapping[str, int]]] = None,
+    clinic_forbidden_people: Optional[Mapping[int, Sequence[str]]] = None,
+    duty_seniority_rules: Optional[Mapping[int, Mapping[str, int]]] = None,
+    duty_senorty_rules: Optional[Mapping[int, Mapping[str, int]]] = None,
     clinic_repeat_history: Optional[Mapping[int, Sequence[str]]] = None,
     weekend_history_counts: Optional[Mapping[str, int]] = None,
     staff_leave_requests: Optional[Mapping[int, Sequence[Tuple[dt.date, dt.date]]]] = None,
     objective_mode: str = "seniority",
 ) -> Dict[str, Any]:
     """Solve scheduling for arbitrary people and slots."""
+    if duty_seniority_rules is None and duty_senorty_rules is not None:
+        duty_seniority_rules = duty_senorty_rules
+
     rotation_days_map: Dict[int, int] = {}
     if clinic_rotation_periods:
         for clinic_key, rotation_value in clinic_rotation_periods.items():
@@ -1073,6 +1246,9 @@ def solve_schedule(
         enforce_person_limits=enforce_person_limits,
         clinic_rotation_days=rotation_days_map,
         clinic_seniority_rules=clinic_seniority_rules,
+        clinic_forbidden_people=clinic_forbidden_people,
+        duty_seniority_rules=duty_seniority_rules,
+        duty_senorty_rules=duty_senorty_rules,
         repeat_history=repeat_history_map,
         leave_calendar=leave_calendar,
         weekend_history_counts=weekend_history_by_identifier,
@@ -1122,4 +1298,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

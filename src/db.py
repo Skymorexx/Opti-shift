@@ -125,6 +125,8 @@ def _init_postgres_schema() -> None:
             seniority TEXT,
             min_night_duties_per_month INTEGER,
             max_night_duties_per_month INTEGER,
+            education_year INTEGER,
+            night_duty_exempt BOOLEAN NOT NULL DEFAULT FALSE,
             unit_id INTEGER NOT NULL REFERENCES units(id) ON DELETE CASCADE
         )
         """,
@@ -160,6 +162,16 @@ def _init_postgres_schema() -> None:
         )
         """,
         """
+        CREATE TABLE IF NOT EXISTS duty_seniority_rules (
+            id SERIAL PRIMARY KEY,
+            duty_type_id INTEGER NOT NULL REFERENCES duty_types(id) ON DELETE CASCADE,
+            required_seniority TEXT NOT NULL,
+            required_count INTEGER NOT NULL CHECK (required_count >= 0),
+            unit_id INTEGER NOT NULL REFERENCES units(id) ON DELETE CASCADE,
+            UNIQUE (duty_type_id, required_seniority)
+        )
+        """,
+        """
         CREATE TABLE IF NOT EXISTS assignment_history (
             id SERIAL PRIMARY KEY,
             staff_id INTEGER NOT NULL REFERENCES staff(id),
@@ -188,6 +200,7 @@ def _init_postgres_schema() -> None:
         "CREATE INDEX IF NOT EXISTS idx_clinics_unit_id ON clinics(unit_id)",
         "CREATE INDEX IF NOT EXISTS idx_duty_types_unit_id ON duty_types(unit_id)",
         "CREATE INDEX IF NOT EXISTS idx_clinic_rules_unit_id ON clinic_seniority_rules(unit_id)",
+        "CREATE INDEX IF NOT EXISTS idx_duty_rules_unit_id ON duty_seniority_rules(unit_id)",
         "CREATE INDEX IF NOT EXISTS idx_assignment_history_unit_id ON assignment_history(unit_id)",
         "CREATE INDEX IF NOT EXISTS idx_leave_requests_unit_id ON leave_requests(unit_id)",
     ]
@@ -198,6 +211,13 @@ def _init_postgres_schema() -> None:
                 cur.execute(statement)
             for statement in index_statements:
                 cur.execute(statement)
+            cur.execute("ALTER TABLE staff ADD COLUMN IF NOT EXISTS education_year INTEGER")
+            cur.execute(
+                "ALTER TABLE staff ADD COLUMN IF NOT EXISTS night_duty_exempt BOOLEAN NOT NULL DEFAULT FALSE"
+            )
+            cur.execute(
+                "UPDATE staff SET night_duty_exempt = FALSE WHERE night_duty_exempt IS NULL"
+            )
         raw_conn.commit()
 
     @staticmethod
@@ -359,6 +379,8 @@ def init_db() -> None:
                 seniority TEXT,
                 min_night_duties_per_month INTEGER,
                 max_night_duties_per_month INTEGER,
+                education_year INTEGER,
+                night_duty_exempt INTEGER DEFAULT 0,
                 unit_id INTEGER NOT NULL DEFAULT 1,
                 FOREIGN KEY (unit_id) REFERENCES units(id) ON DELETE CASCADE
             )
@@ -393,8 +415,10 @@ def init_db() -> None:
         )
         _ensure_staff_allows_null_seniority(conn)
         _ensure_duty_type_category(conn)
+        _ensure_staff_training_columns(conn)
         _ensure_clinic_rotation_period(conn)
         _ensure_clinic_seniority_rules_table(conn)
+        _ensure_duty_seniority_rules_table(conn)
         _ensure_assignment_history_table(conn)
         _ensure_leave_requests_table(conn)
 
@@ -426,6 +450,12 @@ def init_db() -> None:
         )
         _ensure_table_has_unit_column(
             conn,
+            "duty_seniority_rules",
+            index_name="idx_duty_rules_unit_id",
+            default_unit_id=default_unit_id,
+        )
+        _ensure_table_has_unit_column(
+            conn,
             "assignment_history",
             index_name="idx_assignment_history_unit_id",
             default_unit_id=default_unit_id,
@@ -449,7 +479,13 @@ def _ensure_staff_allows_null_seniority(conn: sqlite3.Connection) -> None:
     columns = conn.execute("PRAGMA table_info(staff)").fetchall()
     column_names = {col[1] for col in columns}
     seniority_info = next((col for col in columns if col[1] == "seniority"), None)
-    needs_rebuild = bool(seniority_info and seniority_info[3]) or "min_night_duties_per_month" not in column_names or "max_night_duties_per_month" not in column_names
+    needs_rebuild = (
+        bool(seniority_info and seniority_info[3])
+        or "min_night_duties_per_month" not in column_names
+        or "max_night_duties_per_month" not in column_names
+        or "education_year" not in column_names
+        or "night_duty_exempt" not in column_names
+    )
     if not needs_rebuild:
         return
 
@@ -461,18 +497,22 @@ def _ensure_staff_allows_null_seniority(conn: sqlite3.Connection) -> None:
             title TEXT NOT NULL,
             seniority TEXT,
             min_night_duties_per_month INTEGER,
-            max_night_duties_per_month INTEGER
+            max_night_duties_per_month INTEGER,
+            education_year INTEGER,
+            night_duty_exempt INTEGER DEFAULT 0
         )
         """
     )
 
     select_min = "min_night_duties_per_month" if "min_night_duties_per_month" in column_names else "NULL"
     select_max = "max_night_duties_per_month" if "max_night_duties_per_month" in column_names else "NULL"
+    select_education = "education_year" if "education_year" in column_names else "NULL"
+    select_night_exempt = "night_duty_exempt" if "night_duty_exempt" in column_names else "0"
 
     conn.execute(
         f"""
         INSERT INTO staff__migrate (
-            id, name, title, seniority, min_night_duties_per_month, max_night_duties_per_month
+            id, name, title, seniority, min_night_duties_per_month, max_night_duties_per_month, education_year, night_duty_exempt
         )
         SELECT
             id,
@@ -480,12 +520,27 @@ def _ensure_staff_allows_null_seniority(conn: sqlite3.Connection) -> None:
             title,
             seniority,
             {select_min},
-            {select_max}
+            {select_max},
+            {select_education},
+            {select_night_exempt}
         FROM staff
         """
     )
     conn.execute("DROP TABLE staff")
     conn.execute("ALTER TABLE staff__migrate RENAME TO staff")
+
+
+def _ensure_staff_training_columns(conn: sqlite3.Connection) -> None:
+    """Ensure staff table exposes education year and night duty exemption flags."""
+    columns = conn.execute("PRAGMA table_info(staff)").fetchall()
+    column_names = {col[1] for col in columns}
+    if "education_year" not in column_names:
+        conn.execute("ALTER TABLE staff ADD COLUMN education_year INTEGER")
+    if "night_duty_exempt" not in column_names:
+        conn.execute("ALTER TABLE staff ADD COLUMN night_duty_exempt INTEGER DEFAULT 0")
+    conn.execute(
+        "UPDATE staff SET night_duty_exempt = COALESCE(night_duty_exempt, 0)"
+    )
 
 
 def _ensure_clinic_display_order(conn: sqlite3.Connection) -> None:
@@ -571,6 +626,24 @@ def _ensure_clinic_seniority_rules_table(conn: sqlite3.Connection) -> None:
             unit_id INTEGER NOT NULL DEFAULT 1,
             UNIQUE (clinic_id, required_seniority),
             FOREIGN KEY (clinic_id) REFERENCES clinics(id) ON DELETE CASCADE,
+            FOREIGN KEY (unit_id) REFERENCES units(id) ON DELETE CASCADE
+        )
+        """
+    )
+
+
+def _ensure_duty_seniority_rules_table(conn: sqlite3.Connection) -> None:
+    """Create duty seniority rules table if necessary."""
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS duty_seniority_rules (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            duty_type_id INTEGER NOT NULL,
+            required_seniority TEXT NOT NULL,
+            required_count INTEGER NOT NULL CHECK(required_count >= 0),
+            unit_id INTEGER NOT NULL DEFAULT 1,
+            UNIQUE (duty_type_id, required_seniority),
+            FOREIGN KEY (duty_type_id) REFERENCES duty_types(id) ON DELETE CASCADE,
             FOREIGN KEY (unit_id) REFERENCES units(id) ON DELETE CASCADE
         )
         """
@@ -742,7 +815,15 @@ def list_staff(unit_id: int) -> Iterable[Mapping[str, Optional[str]]]:
     with get_connection() as conn:
         rows = conn.execute(
             """
-            SELECT id, name, title, seniority, min_night_duties_per_month, max_night_duties_per_month
+            SELECT
+                id,
+                name,
+                title,
+                seniority,
+                min_night_duties_per_month,
+                max_night_duties_per_month,
+                education_year,
+                night_duty_exempt
             FROM staff
             WHERE unit_id = ?
             ORDER BY id ASC
@@ -759,11 +840,24 @@ def add_staff(
     *,
     min_night: Optional[int] = None,
     max_night: Optional[int] = None,
+    education_year: Optional[int] = None,
+    night_duty_exempt: bool = False,
     unit_id: int,
 ) -> int:
     """Insert a staff record and return the new row ID."""
     min_value = min_night if min_night is not None and min_night >= 0 else None
     max_value = max_night if max_night is not None and max_night >= 0 else None
+    year_value: Optional[int]
+    if education_year is None:
+        year_value = None
+    else:
+        try:
+            year_candidate = int(education_year)
+        except (TypeError, ValueError):
+            year_value = None
+        else:
+            year_value = year_candidate if 1 <= year_candidate <= 5 else None
+    night_value = 1 if night_duty_exempt else 0
     with get_connection() as conn:
         cursor = conn.execute(
             """
@@ -773,9 +867,11 @@ def add_staff(
                 seniority,
                 min_night_duties_per_month,
                 max_night_duties_per_month,
+                education_year,
+                night_duty_exempt,
                 unit_id
             )
-            VALUES (?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 name.strip(),
@@ -783,6 +879,8 @@ def add_staff(
                 seniority.strip() if seniority else None,
                 min_value,
                 max_value,
+                year_value,
+                night_value,
                 unit_id,
             ),
         )
@@ -805,7 +903,15 @@ def get_staff_by_id(staff_id: int, unit_id: int) -> Optional[Mapping[str, Option
     with get_connection() as conn:
         row = conn.execute(
             """
-            SELECT id, name, title, seniority, min_night_duties_per_month, max_night_duties_per_month
+            SELECT
+                id,
+                name,
+                title,
+                seniority,
+                min_night_duties_per_month,
+                max_night_duties_per_month,
+                education_year,
+                night_duty_exempt
             FROM staff
             WHERE id = ? AND unit_id = ?
             """,
@@ -820,6 +926,8 @@ def update_staff_preferences(
     seniority: Optional[str],
     min_night: Optional[int],
     max_night: Optional[int],
+    education_year: Optional[int],
+    night_duty_exempt: bool,
     unit_id: int,
 ) -> None:
     """Update an assistant doctor's seniority and night duty preferences."""
@@ -831,15 +939,34 @@ def update_staff_preferences(
 
     min_value = min_night if (min_night is not None and min_night >= 0) else None
     max_value = max_night if (max_night is not None and max_night >= 0) else None
+    if min_value is not None and max_value is not None and min_value > max_value:
+        min_value, max_value = None, None
+
+    if education_year is None:
+        year_value = None
+    else:
+        try:
+            year_candidate = int(education_year)
+        except (TypeError, ValueError):
+            year_value = None
+        else:
+            year_value = year_candidate if 1 <= year_candidate <= 5 else None
+
+    night_value = 1 if night_duty_exempt else 0
 
     with get_connection() as conn:
         conn.execute(
             """
             UPDATE staff
-            SET seniority = ?, min_night_duties_per_month = ?, max_night_duties_per_month = ?
+            SET
+                seniority = ?,
+                min_night_duties_per_month = ?,
+                max_night_duties_per_month = ?,
+                education_year = ?,
+                night_duty_exempt = ?
             WHERE id = ? AND unit_id = ?
             """,
-            (normalized_seniority, min_value, max_value, staff_id, unit_id),
+            (normalized_seniority, min_value, max_value, year_value, night_value, staff_id, unit_id),
         )
         conn.commit()
 
@@ -1013,6 +1140,81 @@ def delete_clinic_seniority_rule(rule_id: int, unit_id: int) -> None:
     with get_connection() as conn:
         conn.execute(
             "DELETE FROM clinic_seniority_rules WHERE id = ? AND unit_id = ?",
+            (rule_id, unit_id),
+        )
+        conn.commit()
+
+
+def delete_duty_type(duty_type_id: int, unit_id: int) -> None:
+    """Remove a duty type for the given unit."""
+    with get_connection() as conn:
+        conn.execute(
+            "DELETE FROM duty_types WHERE id = ? AND unit_id = ?",
+            (duty_type_id, unit_id),
+        )
+        conn.commit()
+
+
+def list_duty_seniority_rules(
+    unit_id: int,
+    duty_type_id: Optional[int] = None,
+) -> Iterable[Mapping[str, Optional[str]]]:
+    """Fetch duty seniority rules; optionally limit to a single duty type."""
+    query = (
+        "SELECT id, duty_type_id, required_seniority, required_count "
+        "FROM duty_seniority_rules "
+        "WHERE unit_id = ? "
+    )
+    params: List[Any] = [unit_id]
+    if duty_type_id is not None:
+        query += "AND duty_type_id = ? "
+        params.append(duty_type_id)
+    query += "ORDER BY duty_type_id ASC, id ASC"
+    with get_connection() as conn:
+        rows = conn.execute(query, tuple(params)).fetchall()
+    return rows
+
+
+def add_duty_seniority_rule(
+    duty_type_id: int,
+    required_seniority: str,
+    count: int,
+    *,
+    unit_id: int,
+) -> int:
+    """Insert a seniority rule for a duty type."""
+    seniority = (required_seniority or "").strip().lower()
+    if seniority not in {"comez", "ara", "kidemli"}:
+        raise ValueError("Geçersiz kıdem seviyesi.")
+    try:
+        normalized_count = int(count)
+    except (TypeError, ValueError) as exc:  # pragma: no cover - defensive parsing
+        raise ValueError("Geçersiz adet değeri.") from exc
+    normalized_count = max(0, normalized_count)
+    with get_connection() as conn:
+        duty_row = conn.execute(
+            "SELECT 1 FROM duty_types WHERE id = ? AND unit_id = ?",
+            (duty_type_id, unit_id),
+        ).fetchone()
+        if not duty_row:
+            raise ValueError("Nöbet türü bu tenant için bulunamadı.")
+        cursor = conn.execute(
+            """
+            INSERT INTO duty_seniority_rules (duty_type_id, required_seniority, required_count, unit_id)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(duty_type_id, required_seniority) DO UPDATE SET required_count = excluded.required_count
+            """,
+            (duty_type_id, seniority, normalized_count, unit_id),
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+
+def delete_duty_seniority_rule(rule_id: int, unit_id: int) -> None:
+    """Delete a duty seniority rule row."""
+    with get_connection() as conn:
+        conn.execute(
+            "DELETE FROM duty_seniority_rules WHERE id = ? AND unit_id = ?",
             (rule_id, unit_id),
         )
         conn.commit()

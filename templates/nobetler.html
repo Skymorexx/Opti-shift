@@ -77,14 +77,17 @@
               <th scope="col">{{ t('Süre (saat)') }}</th>
               <th scope="col">{{ t('Kategori') }}</th>
               <th scope="col">{{ t('Gerekli Personel') }}</th>
+              <th scope="col">{{ t('Kıdem Kuralları') }}</th>
+              <th scope="col">{{ t('İşlemler') }}</th>
             </tr>
           </thead>
           <tbody>
             {% for duty in duty_types %}
               {% set category = (duty['duty_category'] or 'nobet') | lower %}
+              {% set is_cap = (duty['name'] or '').strip().lower() == 'cap' %}
               <tr>
                 <td>{{ duty["id"] }}</td>
-                <td>{{ t('İcap') if (duty['name'] or '').strip().lower() == 'cap' else duty['name'] }}</td>
+                <td>{{ t('İcap') if is_cap else duty['name'] }}</td>
                 <td>{{ duty["duration_hours"] }}</td>
                 <td>
                   <span class="opt-badge opt-badge--{{ category }}">
@@ -92,6 +95,49 @@
                   </span>
                 </td>
                 <td>{{ duty['required_staff_count'] or 1 }}</td>
+                <td>
+                  <div class="opt-clinic-rules">
+                    {% if is_cap %}
+                      <p class="opt-meta mb-2">{{ t('İcap nöbeti uzmanlar tarafından tutulur.') }}</p>
+                    {% elif duty.seniority_rules %}
+                      <ul class="opt-clinic-rules__list">
+                        {% for rule in duty.seniority_rules %}
+                          <li>
+                            <span class="opt-badge">{{ t(rule["seniority_label"]) }}</span>
+                            <span>{{ t('{count} adet', count=rule["required_count"]) }}</span>
+                            <form method="post" action="{{ url_for('nobetler') }}">
+                              <input type="hidden" name="action" value="delete_rule">
+                              <input type="hidden" name="rule_id" value="{{ rule['id'] }}">
+                              <button type="submit" class="btn btn-link btn-sm text-danger">{{ t('Sil') }}</button>
+                            </form>
+                          </li>
+                        {% endfor %}
+                      </ul>
+                    {% else %}
+                      <p class="opt-meta mb-2">{{ t('Henüz kural yok.') }}</p>
+                    {% endif %}
+                    {% if not is_cap %}
+                      <form method="post" action="{{ url_for('nobetler') }}" class="opt-clinic-rules__form">
+                        <input type="hidden" name="action" value="add_rule">
+                        <input type="hidden" name="duty_type_id" value="{{ duty['id'] }}">
+                        <select name="required_seniority" class="form-select form-select-sm">
+                          {% for value, label in seniority_options %}
+                            <option value="{{ value }}">{{ t(label) }}</option>
+                          {% endfor %}
+                        </select>
+                        <input type="number" name="required_count" class="form-control form-control-sm" value="1" min="0">
+                        <button type="submit" class="btn btn-outline-primary btn-sm">{{ t('Ekle') }}</button>
+                      </form>
+                    {% endif %}
+                  </div>
+                </td>
+                <td class="text-end">
+                  <form method="post" action="{{ url_for('nobetler') }}" class="d-inline">
+                    <input type="hidden" name="action" value="delete_duty">
+                    <input type="hidden" name="duty_type_id" value="{{ duty['id'] }}">
+                    <button type="submit" class="btn btn-outline-danger btn-sm">{{ t('Sil') }}</button>
+                  </form>
+                </td>
               </tr>
             {% endfor %}
           </tbody>
