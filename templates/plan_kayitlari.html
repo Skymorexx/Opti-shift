@@ -172,4 +172,33 @@
       </div>
     </section>
   {% endif %}
+
+  {% if assistant_clinic_weeks %}
+    <section class="opt-surface-card mt-4">
+      <header class="opt-toolbar">
+        <h2 class="opt-toolbar-title">{{ t('Asistan Klinik Haftaları') }}</h2>
+        <span class="opt-plan-note mb-0">{{ t('Tüm kayıtlı planlar üzerinden benzersiz hafta sayısı.') }}</span>
+      </header>
+      <div class="opt-table-wrapper">
+        <table class="table table-hover align-middle mb-0">
+          <thead>
+            <tr>
+              <th scope="col">{{ t('Personel') }}</th>
+              <th scope="col">{{ t('Klinik') }}</th>
+              <th scope="col">{{ t('Toplam Hafta') }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for entry in assistant_clinic_weeks %}
+              <tr>
+                <td>{{ entry.staff_name }}</td>
+                <td>{{ entry.clinic_name or '-' }}</td>
+                <td>{{ entry.week_count }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  {% endif %}
 {% endblock %}

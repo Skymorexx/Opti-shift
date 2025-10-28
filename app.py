@@ -183,6 +183,11 @@ TRANSLATIONS = {
         "Değişiklikler uygulandı, kaydetmek için onaylayın.": "Changes applied. Save to confirm.",
         "Klinik planı": "Clinic plan",
         "Nöbet planı": "Duty plan",
+        "İcap planı yalnızca uzmanlara atanabilir.": "On-call duty can only be assigned to specialists.",
+        "Asistan Klinik Haftaları": "Assistant Clinic Weeks",
+        "Tüm kayıtlı planlar üzerinden benzersiz hafta sayısı.": "Unique week count across all saved plans.",
+        "Toplam Hafta": "Total Weeks",
+        "Bilinmeyen Klinik": "Unknown Clinic",
         "Eğitim Yılı": "Training Year",
         "Eğitim yılı seçin": "Select training year",
         "Eğitim yılı yok": "No training year",
@@ -1814,7 +1819,7 @@ def plan_kayitlari():
 
     staff_rows = [dict(row) for row in list(list_staff(unit_id))]
     clinic_rows = [dict(row) for row in list(list_clinics(unit_id))]
-    staff_map = {row["id"]: row.get("name") for row in staff_rows}
+    staff_map = {row["id"]: row for row in staff_rows}
     clinic_map = {row["id"]: row.get("name") for row in clinic_rows}
 
     history_rows = [dict(row) for row in list(list_assignment_history(unit_id))]
@@ -1844,10 +1849,14 @@ def plan_kayitlari():
                 "night_entries": [],
             },
         )
-        clinic_id = row.get("clinic_id")
+        clinic_id_raw = row.get("clinic_id")
+        clinic_id = _safe_int(clinic_id_raw)
+        staff_id_raw = row.get("staff_id")
+        staff_id_val = _safe_int(staff_id_raw)
+        staff_info = staff_map.get(staff_id_val) if staff_id_val is not None else None
         entry = {
-            "staff_id": row.get("staff_id"),
-            "staff_name": staff_map.get(row.get("staff_id"), f"ID {row.get('staff_id')}"),
+            "staff_id": staff_id_val,
+            "staff_name": staff_info.get("name") if staff_info else f"ID {staff_id_raw}",
             "clinic_id": clinic_id,
             "clinic_name": clinic_map.get(clinic_id) if clinic_id is not None else None,
             "assignment_date": row.get("assignment_date"),
@@ -1881,6 +1890,51 @@ def plan_kayitlari():
 
     records.sort(key=lambda item: sort_period_key(item["period"]), reverse=True)
 
+    week_summary: Dict[Tuple[int, int], Set[Tuple[int, int]]] = defaultdict(set)
+    for row in history_rows:
+        clinic_id = _safe_int(row.get("clinic_id"))
+        if clinic_id is None:
+            continue
+        staff_id = _safe_int(row.get("staff_id"))
+        if staff_id is None:
+            continue
+        staff_info = staff_map.get(staff_id)
+        if not staff_info:
+            continue
+        title_value = (staff_info.get("title") or "").strip().lower()
+        if not title_value.startswith("asst"):
+            continue
+        assignment_date = row.get("assignment_date")
+        if not assignment_date:
+            continue
+        try:
+            date_obj = date.fromisoformat(assignment_date)
+        except ValueError:
+            continue
+        iso_year, iso_week, iso_weekday = date_obj.isocalendar()
+        week_summary[(staff_id, clinic_id)].add((iso_year, iso_week))
+
+    assistant_clinic_weeks: List[Dict[str, Any]] = []
+    for (staff_id, clinic_id), weeks in week_summary.items():
+        staff_info = staff_map.get(staff_id)
+        clinic_name = clinic_map.get(clinic_id, _("Bilinmeyen Klinik"))
+        assistant_clinic_weeks.append(
+            {
+                "staff_id": staff_id,
+                "staff_name": staff_info.get("name") if staff_info else f"ID {staff_id}",
+                "clinic_id": clinic_id,
+                "clinic_name": clinic_name,
+                "week_count": len(weeks),
+            }
+        )
+
+    assistant_clinic_weeks.sort(
+        key=lambda item: (
+            (item["staff_name"] or "").lower(),
+            (item["clinic_name"] or "").lower(),
+        )
+    )
+
     filter_options = [
         {"value": "all", "label": _("Tümü")},
         {"value": "clinic", "label": _("Klinik planları")},
@@ -1894,6 +1948,7 @@ def plan_kayitlari():
         filter_options=filter_options,
         status_message=status_message,
         status_error=status_error,
+        assistant_clinic_weeks=assistant_clinic_weeks,
     )
 
 
@@ -2014,10 +2069,28 @@ def plan_duzenle():
         )
 
     current_assignments: List[Dict[str, Any]] = [dict(item) for item in result.get("assignments") or []]
-    assignment_lookup = {item["slot_id"]: item for item in current_assignments}
+    assignment_lookup = {item["slot_id"]: item for item in current_assignments if item.get("slot_id")}
 
     form_message = None
     form_error = None
+
+    def determine_slot_kind(assignment: Mapping[str, Any]) -> str:
+        slot_id_value = assignment.get("slot_id") or ""
+        clinic_id_value = _extract_clinic_id(slot_id_value)
+        if clinic_id_value is not None:
+            return "clinic"
+        duty_type_label = (assignment.get("duty_type") or "").strip().lower()
+        label_lower = (assignment.get("label") or "").strip().lower()
+        person_title_lower = (assignment.get("person_title") or "").strip().lower()
+        if "icap" in duty_type_label or "icap" in label_lower or person_title_lower.startswith("uzm"):
+            return "nobet_cap"
+        return "nobet"
+
+    slot_kind_map: Dict[str, str] = {
+        assignment["slot_id"]: determine_slot_kind(assignment)
+        for assignment in current_assignments
+        if assignment.get("slot_id")
+    }
 
     if request.method == "POST":
         slot_ids = request.form.getlist("slot_id[]")
@@ -2031,16 +2104,22 @@ def plan_duzenle():
                 base_assignment = assignment_lookup.get(slot_id)
                 if base_assignment is None:
                     continue
+                slot_kind = slot_kind_map.get(slot_id, "nobet" if plan_type == "nobet" else "clinic")
                 staff_int = _safe_int(staff_value)
                 if staff_int is None or staff_int not in staff_map:
                     validation_error = _("Geçerli bir personel seçin.")
                     break
                 staff_row = staff_map[staff_int]
-                if plan_type == "nobet":
+                title_value = (staff_row.get("title") or "").strip().lower()
+                if slot_kind == "nobet":
                     title_value = (staff_row.get("title") or "").strip().lower()
                     night_flag = int(staff_row.get("night_duty_exempt") or 0)
                     if not title_value.startswith("asst") or night_flag:
                         validation_error = _("Nöbet planı yalnızca nöbet tutabilir asistanlara atanabilir.")
+                        break
+                elif slot_kind == "nobet_cap":
+                    if not title_value.startswith("uzm"):
+                        validation_error = _("İcap planı yalnızca uzmanlara atanabilir.")
                         break
                 updated_assignment = dict(base_assignment)
                 updated_assignment["person_id"] = f"staff_{staff_int}"
@@ -2055,7 +2134,16 @@ def plan_duzenle():
                 form_error = validation_error
             else:
                 current_assignments = modified_assignments
-                assignment_lookup = {item["slot_id"]: item for item in current_assignments}
+                assignment_lookup = {
+                    item["slot_id"]: item
+                    for item in current_assignments
+                    if item.get("slot_id")
+                }
+                slot_kind_map = {
+                    assignment["slot_id"]: determine_slot_kind(assignment)
+                    for assignment in current_assignments
+                    if assignment.get("slot_id")
+                }
                 if submit_action == "save":
                     _store_plan_assignments(unit_id, plan_type, current_assignments, year, month)
                     return redirect(
@@ -2079,6 +2167,8 @@ def plan_duzenle():
                 night_flag = int(staff.get("night_duty_exempt") or 0)
                 if not title_value.startswith("asst") or night_flag:
                     allow = False
+            elif slot_kind == "nobet_cap":
+                allow = title_value.startswith("uzm")
             if allow or (selected_staff_id is not None and staff["id"] == selected_staff_id):
                 options.append(
                     {
@@ -2100,7 +2190,8 @@ def plan_duzenle():
         clinic_name = clinic_map.get(clinic_id) if clinic_id is not None else None
         person_identifier = assignment.get("person_id") or ""
         current_staff_id = _safe_int(person_identifier.split("_", 1)[1]) if person_identifier.startswith("staff_") else None
-        slot_kind = "clinic" if clinic_id is not None else "nobet"
+        slot_kind = slot_kind_map.get(slot_id) or determine_slot_kind(assignment)
+        slot_kind_map[slot_id] = slot_kind
         options = eligible_staff(slot_kind, current_staff_id)
         try:
             day_type_value = _classify_day_type(date.fromisoformat(assignment_date)) if assignment_date else "weekday"
@@ -2115,6 +2206,7 @@ def plan_duzenle():
                 "current_staff_id": current_staff_id,
                 "options": options,
                 "day_type": day_type_value,
+                "slot_kind": slot_kind,
             }
         )
 
