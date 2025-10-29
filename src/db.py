@@ -997,10 +997,16 @@ def add_clinic(
     """Insert a clinic and return new ID."""
     with get_connection() as conn:
         max_order_row = conn.execute(
-            "SELECT MAX(display_order) FROM clinics WHERE unit_id = ?",
+            "SELECT MAX(display_order) AS max_display_order FROM clinics WHERE unit_id = ?",
             (unit_id,),
         ).fetchone()
-        max_order = max_order_row[0] if max_order_row else None
+        if max_order_row:
+            try:
+                max_order = max_order_row["max_display_order"]
+            except (TypeError, KeyError):
+                max_order = max_order_row[0]
+        else:
+            max_order = None
         next_order = (int(max_order) + 1) if max_order is not None else 1
         assistants = required_assistants if required_assistants and required_assistants > 0 else 1
         rotation = _normalize_rotation_period(rotation_period)
